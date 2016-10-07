@@ -109,17 +109,19 @@ class OscamWebif:
         return self._get(url)
 
     def formatDate(self, date):
-        return "{2}. {1}. {0}".format(*date.split("/"))
+        m = re.match("(\d+)-(\d+)-(\d+)T.*", date)
+        if m:
+            return m.group(3)+". "+m.group(2)+". "+m.group(1)
+        return date
     
     #
     # Das Oscam-JSON-API liefert alle nötigen Informationen, um
     # festzustellen, ob es eine laufende lokale V13/V14 gibt.
-    # Das Expire-Date, den Reader-Label sowie die CAID zurückgeben
+    # Den Reader-Label sowie die CAID zurückgeben.
     #
     def getStatusSky(self):
         status = self.getStatus()
         reader = None
-        expires = None
         caid = None
         if status:
             obj = json.loads(status)
@@ -129,12 +131,11 @@ class OscamWebif:
                 if conn['$'] == 'CARDOK':
                     for ent in conn['entitlements']:
                         if ent['caid'] in ['09C4', '098C']:
-                            expires = ent['exp']
                             reader = client['rname_enc']
                             caid = ent['caid']
                             break
-            if expires and reader and caid:
-                return { 'reader': reader, 'expires': self.formatDate(expires), 'caid': caid }
+            if reader and caid:
+                return { 'reader': reader, 'caid': caid }
         
         return None
     
@@ -196,20 +197,23 @@ class OscamWebif:
     #
     # Tier-IDs auslesen
     #
-    def getTierIds(self, reader):
+    def getTiers(self, reader):
         url = self.webif+'/oscamapi.json?part=entitlement&label=%s' % reader
         entitlements = self._get(url)
         tiers = []
+        expires = None
         try:
             obj = json.loads(entitlements)
             for line in obj['oscam']['entitlements']:
-                tiers.append( line['id'][-2:] )
+                tiers.append( line['id'][-4:] )
+                if not expires and line['id'][-4:-2] == '00':
+                    expires = self.formatDate(line['expireDate'])
         except:
             pass
-        return tiers
+        return { 'tiers': tiers, 'expires': expires }
 
 class OscamStatus(Screen):
-    version = "2016-10-06 0.1"
+    version = "2016-10-07 0.2"
     skin = { "fhd": """
         <screen name="OscamStatus" position="0,0" size="1920,1080" title="Oscam Status" flags="wfNoBorder">
             <widget name="expires" position="20,20" size="600,36" font="Regular;25" />
@@ -280,6 +284,7 @@ class OscamStatus(Screen):
         self.status = None
         self.list = None
         self.tiers = None
+        self.expires = None
 
         self.adaptScreen()
 	self.skin = OscamStatus.skin[self.useskin]
@@ -292,23 +297,27 @@ class OscamStatus(Screen):
         }, -1)
         
         self["key_red"] = Label(_("Payload ermitteln"))
+        self["key_green"] = Label()
         self["payload"] = Label(_("Payload: rot drücken"))
         self["f0tier"] = Label(_("F0-Tier vorhanden: unbekannt"))
         
         self.fetchStatus()
         if self.status:
-            self["expires"] = Label(_("Karte läuft ab am: %s") % str(self.status["expires"]))
             self["headline"] = Label(_("Liste der gespeicherten EMMs - mit OK zum Schreiben auswählen:"))
             if self.tiers:
-                if "F0" in self.tiers:
+                if "00F0" in self.tiers:
                     f0text = _("ja")
                 else:
                     f0text = _("nein")
                 self["f0tier"].setText(_("F0-Tier vorhanden: %s") % f0text)
         else:
-            self["expires"] = Label(_("Status konnte nicht ermittelt werden."))
             self["headline"] = Label(_("Ist Oscam gestartet? Läuft eine lokale V13/V14 Karte?"))
 
+        if self.expires:
+            self["expires"] = Label(_("Karte läuft ab am: %s") % str(self.expires))
+        else:
+            self["expires"] = Label(_("Status konnte nicht ermittelt werden."))
+            
         self["emmlist"] = List(self.list)
 
 
@@ -387,8 +396,7 @@ class OscamStatus(Screen):
                 httpuser = None
                 httppwd = None
             #
-            # Über die Oscam-Webapi V13/V14-Reader suchen und 
-            # Expire-Datum der Entitlements auslesen
+            # Über die Oscam-Webapi V13/V14-Reader suchen
             #
             self.webif = OscamWebif('localhost', user['httpport'], httpuser, httppwd)
             self.status = self.webif.getStatusSky()
@@ -399,7 +407,9 @@ class OscamStatus(Screen):
             #
             if self.status:
                 self.list = config.getSavedEmm(self.status['reader'])
-                self.tiers = self.webif.getTierIds(self.status['reader'])
+                tiers = self.webif.getTiers(self.status['reader'])
+                self.tiers = tiers['tiers']
+                self.expires = tiers['expires']
 
     # 
     # Das ausgewählte EMM über das Webinterface auf die Karte schreiben
