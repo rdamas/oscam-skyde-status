@@ -20,5 +20,8 @@ def _(txt):
 		t = gettext.gettext(txt)
 	return t
 
+def isDebug():
+    return os.path.exists(resolveFilename(SCOPE_PLUGINS, "Extensions/OscamSkydeStatus/__debug__"))
+
 localeInit()
 language.addCallback(localeInit)

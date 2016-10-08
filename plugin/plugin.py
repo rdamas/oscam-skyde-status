@@ -2,7 +2,7 @@
 #######################################################################
 #
 #  Oscam Skyde Status
-#  Version 0.2
+#  Version 0.3
 #
 #  Copyright (c) 2016 by Robert Damas
 #  All rights reserved.
@@ -25,22 +25,26 @@
 #
 #######################################################################M
 
-from Plugins.Plugin import PluginDescriptor
 import Plugins.Extensions.OscamSkydeStatus.OscamStatus as OscamStatus
+from Plugins.Plugin import PluginDescriptor
+from __init__ import _, isDebug
 
-from __init__ import _
+def main(session, ** kwargs):
+    if isDebug():
+        print "[OSS] Start in debug mode"
+        reload(OscamStatus)
+        try:
+            session.open(OscamStatus.OscamStatus)
+        except:
+            import traceback
+            traceback.print_exc()
+    else:
+        session.open(OscamStatus.OscamStatus)
+        
 
-def main(session, **kwargs):
-	reload(OscamStatus)
-	try:
-		session.open(OscamStatus.OscamStatus)
-	except:
-		import traceback
-		traceback.print_exc()
-
-def Plugins(**kwargs):
-	return PluginDescriptor(
-		name="Oscam Skyde Status", 
-		description=_("V13/V14 Status auslesen und Entis verlängern"), 
-		where = PluginDescriptor.WHERE_PLUGINMENU, 
-		fnc=main)
+def Plugins( ** kwargs):
+    return PluginDescriptor(
+                name="Oscam Skyde Status", 
+                description=_("V13/V14 Status auslesen und Entis verlängern"), 
+                where=PluginDescriptor.WHERE_PLUGINMENU, 
+                fnc=main)
