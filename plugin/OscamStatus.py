@@ -152,9 +152,10 @@ class OscamWebif:
     #
     # Das Formular zum Schreiben eines EMM ans Webif abschicken
     #
-    def writeEmm(self, reader, caid, emm):
+    def writeEmm(self, reader, caid, emm, callback):
         url = self.webif+'/emm_running.html?label=%s&emmfile=&emmcaid=%s&ep=%s&action=Launch' % (reader,caid,emm)
-        return self._get(url)
+        self._get(url)
+        callback()
 
     #
     # Regex um den Payload aus den Daten auszulesen
@@ -451,8 +452,16 @@ class OscamStatus(Screen):
     #
     def writeEmm(self, retval):
         if retval:
-            self.webif.writeEmm(self.status['reader'], self.status['caid'], self.emmToWrite)
+            self.webif.writeEmm(self.status['reader'], self.status['caid'], self.emmToWrite, self.callbackWriteEmm)
     
+    #
+    # Callback vom Webif, wenn Payload auslesen fertig ist
+    #
+    def callbackWriteEmm(self):
+        tiers = self.webif.getTiers(self.status['reader'])
+        self.expires = tiers['expires']
+        self["expires"].setText(_("Karte läuft ab am: %s") % str(self.expires))
+
     #
     # Den Payload ermitteln
     #
