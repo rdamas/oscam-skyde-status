@@ -229,7 +229,8 @@ class OscamStatus(Screen):
             <widget name="expires" position="20,20" size="600,36" font="Regular;25" />
             <widget name="payload" position="620,20" size="700,36" font="Regular;25" />
             <widget name="f0tier" position="1340,20" size="400,36" font="Regular;25" />
-            <widget name="headline" position="20,60" size="1880,76" font="Regular;25" />
+            <widget name="headline" position="20,60" size="1320,76" font="Regular;25" />
+            <widget name="cardtype" position="1340,60" size="400,76" font="Regular;25" />
             <widget render="Listbox" source="emmlist" enableWrapAround="0"
                 position="20,100" size="1880,880" transparent="1"  
                 font="Regular;25" zPosition="5" scrollbarMode="showOnDemand"
@@ -267,7 +268,8 @@ class OscamStatus(Screen):
             <widget name="expires" position="10,10" size="400,24" font="Regular;18" />
             <widget name="payload" position="420,10" size="430,24" font="Regular;18" />
             <widget name="f0tier" position="860,10" size="330,24" font="Regular;18" />
-            <widget name="headline" position="10,40" size="1260,45" font="Regular;18" />
+            <widget name="headline" position="10,40" size="840,45" font="Regular;18" />
+            <widget name="cardtype" position="860,40" size="330,45" font="Regular;18" />
             <widget render="Listbox" source="emmlist" enableWrapAround="0"
                 position="10,90" size="1260,560" transparent="1"  
                 font="Regular;18" zPosition="5" scrollbarMode="showOnDemand"
@@ -322,16 +324,25 @@ class OscamStatus(Screen):
         self["key_green"] = Label()
         self["payload"] = Label(_("Payload: rot drücken"))
         self["f0tier"] = Label(_("F0-Tier vorhanden: unbekannt"))
+        self["cardtype"] = Label()
         
         self.fetchStatus()
         if self.status:
-            self["headline"] = Label(_("Liste der gespeicherten EMMs - mit OK zum Schreiben auswählen:"))
+            self["headline"] = Label(_("Liste der gespeicherten EMMs - mit OK zum Schreiben auswählen."))
+
             if self.tiers:
                 if "00F0" in self.tiers:
                     f0text = _("ja")
                 else:
                     f0text = _("nein")
                 self["f0tier"].setText(_("F0-Tier vorhanden: %s") % f0text)
+            
+            if self.status["caid"] == "09C4":
+                cardtype = "V13"
+            else:
+                cardtype = "V14"
+            self["cardtype"].setText( _("Kartentyp: %s") % cardtype )
+
         else:
             self["headline"] = Label(_("Ist Oscam gestartet? Läuft eine lokale V13/V14 Karte?"))
 
@@ -429,7 +440,7 @@ class OscamStatus(Screen):
             # versuchen, aus dem Oscam-Config-Dir die unique EMMs zu holen
             #
             if self.status:
-                self.list = [ ("Erstes Vorkommen", "Letztes Vorkommen", "EMM: Länge Serial Data", "")]
+                self.list = [ ("Erstes Vorkommen", "Letztes Vorkommen", "EMM", "")]
                 self.list.extend( config.getSavedEmm(self.status['reader']) )
                 tiers = self.webif.getTiers(self.status['reader'])
                 self.tiers = tiers['tiers']
