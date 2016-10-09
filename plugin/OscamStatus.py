@@ -88,7 +88,6 @@ class OscamConfig:
         for key in keys:
             payload = key[0:6] + ' ' + key[6:8] + ' ######## ' + key[16:30] + ' ...'
             ret.append( ( self.formatDate(seen[key]['first']), self.formatDate(seen[key]['last']), payload, key) )
-            print "[OSS]", payload
         return ret
     
 
@@ -193,7 +192,6 @@ class OscamWebif:
             print "[OSS]", e
             pass
         
-        print "[OSS]", self.callback
         return self.callback(payload)
 
     #
