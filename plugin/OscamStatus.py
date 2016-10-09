@@ -61,10 +61,10 @@ class OscamConfig:
     # am TV die Serial und Data unkenntlich machen.
     #
     def getSavedEmm(self, reader):
-    
+
         def getitem(x):
-            return seen[x]
-            
+            return seen[x]['last']
+
         logfile = self.emmlogdir + '/' + reader + '_unique_emm.log'
         seen = {}
         ret = []
@@ -72,13 +72,23 @@ class OscamConfig:
         with open(logfile, 'r') as log:
             for line in log:
                 elems = re.split(" +", line.rstrip())
-                seen[elems[3]] = elems[0] + ' ' + elems[1]
+                key = elems[3]
+                date = elems[0] + ' ' + elems[1]
+                try:
+                    if seen[key]['first'] > date:
+                        seen[key]['first'] = date
+                    if seen[key]['last'] < date:
+                        seen[key]['last'] = date
+                except:
+                    seen[key] = {}
+                    seen[key]['first'] = date
+                    seen[key]['last'] = date
 
         keys = sorted(seen, key=getitem, reverse=True)
         for key in keys:
             payload = key[0:6] + ' ' + key[6:8] + ' ######## ' + key[16:30] + ' ...'
-            ret.append( ( self.formatDate(seen[key]), payload, key) )
-
+            ret.append( ( self.formatDate(seen[key]['first']), self.formatDate(seen[key]['last']), payload, key) )
+            print "[OSS]", payload
         return ret
     
 
@@ -213,7 +223,7 @@ class OscamWebif:
         return { 'tiers': tiers, 'expires': expires }
 
 class OscamStatus(Screen):
-    version = "2016-10-08 0.3"
+    version = "2016-10-09 0.4"
     skin = { "fhd": """
         <screen name="OscamStatus" position="0,0" size="1920,1080" title="Oscam Status" flags="wfNoBorder">
             <widget name="expires" position="20,20" size="600,36" font="Regular;25" />
@@ -234,10 +244,16 @@ class OscamStatus(Screen):
                             text = 0),
                         MultiContentEntryText(
                             pos = (400, 10), 
-                            size = (1400, 40), 
+                            size = (380, 40), 
+                            font = 0, 
+                            flags = RT_HALIGN_LEFT | RT_VALIGN_TOP, 
+                            text = 1),
+                        MultiContentEntryText(
+                            pos = (790, 10), 
+                            size = (1000, 40), 
                             font = 0, 
                             flags = RT_HALIGN_LEFT | RT_VALIGN_TOP | RT_WRAP, 
-                            text = 1), 
+                            text = 2), 
                         ], 
                     "fonts": [gFont("Regular", 24)],
                     "itemHeight": 50 }
@@ -266,10 +282,16 @@ class OscamStatus(Screen):
                             text = 0),
                         MultiContentEntryText(
                             pos = (270, 10), 
-                            size = (900, 33), 
+                            size = (250, 33), 
+                            font = 0, 
+                            flags = RT_HALIGN_LEFT | RT_VALIGN_TOP, 
+                            text = 1),
+                        MultiContentEntryText(
+                            pos = (530, 10), 
+                            size = (640, 33), 
                             font = 0, 
                             flags = RT_HALIGN_LEFT | RT_VALIGN_TOP | RT_WRAP, 
-                            text = 1), 
+                            text = 2), 
                         ], 
                     "fonts": [gFont("Regular", 18)],
                     "itemHeight": 40 }
@@ -325,14 +347,15 @@ class OscamStatus(Screen):
         self.close()
     
     def ok(self):
-        self.emmToWrite = str(self["emmlist"].getCurrent()[2])
-        self.session.openWithCallback(
-            self.writeEmm, 
-            MessageBox, 
-            _("Folgendes EMM wirklich schreiben?\n%s") % self.emmToWrite, 
-            type = MessageBox.TYPE_YESNO,
-            timeout = -1
-        )
+        self.emmToWrite = str(self["emmlist"].getCurrent()[3])
+        if self.emmToWrite != "":
+            self.session.openWithCallback(
+                self.writeEmm, 
+                MessageBox, 
+                _("Folgendes EMM wirklich schreiben?\n%s") % self.emmToWrite, 
+                type = MessageBox.TYPE_YESNO,
+                timeout = -1
+            )
     
     def red(self):
         self.payload = None
@@ -406,7 +429,8 @@ class OscamStatus(Screen):
             # versuchen, aus dem Oscam-Config-Dir die unique EMMs zu holen
             #
             if self.status:
-                self.list = config.getSavedEmm(self.status['reader'])
+                self.list = [ ("Erstes Vorkommen", "Letztes Vorkommen", "EMM: Länge Serial Data", "")]
+                self.list.extend( config.getSavedEmm(self.status['reader']) )
                 tiers = self.webif.getTiers(self.status['reader'])
                 self.tiers = tiers['tiers']
                 self.expires = tiers['expires']
