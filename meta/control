@@ -7,4 +7,3 @@ Description: Auslesen und Verlängern der Oscam-Entis einer V13 und V14
 Section: misc
 Depends: python-requests,python-subprocess,python-json
 Homepage: https://github.com/rdamas/oscam-skyde-status
-

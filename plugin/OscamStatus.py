@@ -237,7 +237,7 @@ class OscamWebif:
         return { 'tiers': tiers, 'expires': expires }
 
 class OscamStatus(Screen):
-    version = "2016-10-09 0.5"
+    version = "2016-10-10 0.5"
     skin = { "fhd": """
         <screen name="OscamStatus" position="0,0" size="1920,1080" title="Oscam Status" flags="wfNoBorder">
             <widget name="expires" position="20,20" size="600,36" font="Regular;25" />
@@ -394,7 +394,7 @@ class OscamStatus(Screen):
     #
     # Das Default-Oscam-Config-Dir ermitteln
     #
-    def getConfdirFromOscamHelp(self, oscam):
+    def determineConfdirFromOscamHelp(self, oscam):
         process = subprocess.Popen(oscam + " --help | grep ConfigDir", shell=True, stdout=subprocess.PIPE)
         for line in process.communicate()[0].split("\n"):
             print "[OSS] Suche Confdir aus:", line
@@ -403,7 +403,7 @@ class OscamStatus(Screen):
                 return m.group(1)
         return None
     
-    def fetchStatus(self):
+    def determineOscamConfdir(self):
         #
         # In der Prozessliste einen laufenden Oscam-Prozess finden
         #
@@ -428,16 +428,32 @@ class OscamStatus(Screen):
                 m = re.search(r"\s(\S*oscam\S*)(\s|$)", line)
                 if m:
                     oscam = m.group(1)
-                    confdir = self.getConfdirFromOscamHelp(oscam)
+                    confdir = self.determineConfdirFromOscamHelp(oscam)
                     if confdir:
                         break
+        return confdir
+    
+    #
+    # Versuchen, aus dem Oscam-Config-Dir die unique EMMs zu holen
+    #
+    def getSavedEmm(self, config):
+        retemm = config.getSavedEmm(self.status['reader'])
+        if retemm['hint']:
+            self['headline'].setText(retemm['hint'])
+        else:
+            self['headline'].setText(_("Liste der gespeicherten EMMs - mit OK zum Schreiben auswählen."))
 
+        self.list = [ ("Erstes Vorkommen", "Letztes Vorkommen", "EMM", "")]
+        self.list.extend( retemm['emm'] )
+    
+    def fetchStatus(self):
+        oscamConfdir = self.determineOscamConfdir()
         #
         # Jetzt aus der oscam.conf die Webif-Config auslesen
         #
-        if confdir:
-            print "[OSS] benutze confdir:", confdir
-            config = OscamConfig(confdir)
+        if oscamConfdir:
+            print "[OSS] benutze Oscam Confdir:", oscamConfdir
+            config = OscamConfig(oscamConfdir)
             user = config.getWebif()
             try:
                 httpuser = user['httpuser']
@@ -451,23 +467,14 @@ class OscamStatus(Screen):
             self.webif = OscamWebif('localhost', user['httpport'], httpuser, httppwd)
             self.status = self.webif.getStatusSky()
 
-            #
-            # Wenn ein Reader für Sky-CAID's vorhanden ist,
-            # versuchen, aus dem Oscam-Config-Dir die unique EMMs zu holen
-            #
             if self.status:
-                retemm = config.getSavedEmm(self.status['reader'])
-                if retemm['hint']:
-                    self['headline'].setText(retemm['hint'])
-                else:
-                    self['headline'].setText(_("Liste der gespeicherten EMMs - mit OK zum Schreiben auswählen."))
-
-                self.list = [ ("Erstes Vorkommen", "Letztes Vorkommen", "EMM", "")]
-                self.list.extend( retemm['emm'] )
+                # gespeicherte unique EMMs anzeigen
+                self.getSavedEmm(config)
+                
+                # Tier-IDs und Expire-Datum der Karte auslesen
                 tiers = self.webif.getTiers(self.status['reader'])
                 self.tiers = tiers['tiers']
                 self.expires = tiers['expires']
-
     # 
     # Das ausgewählte EMM über das Webinterface auf die Karte schreiben
     #

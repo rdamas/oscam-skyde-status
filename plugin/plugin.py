@@ -30,6 +30,7 @@ from Plugins.Plugin import PluginDescriptor
 from __init__ import _, isDebug
 
 def main(session, ** kwargs):
+    print "[OSS] Start ", OscamStatus.OscamStatus.version
     if isDebug():
         print "[OSS] Start in debug mode"
         reload(OscamStatus)
