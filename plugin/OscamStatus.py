@@ -68,27 +68,38 @@ class OscamConfig:
         logfile = self.emmlogdir + '/' + reader + '_unique_emm.log'
         seen = {}
         ret = []
+        hint = ''
 
-        with open(logfile, 'r') as log:
-            for line in log:
-                elems = re.split(" +", line.rstrip())
-                key = elems[3]
-                date = elems[0] + ' ' + elems[1]
-                try:
-                    if seen[key]['first'] > date:
+        print "[OSS] versuche '%s' zu lesen" % logfile
+
+        try:
+            with open(logfile, 'r') as log:
+                for line in log:
+                    elems = re.split(" +", line.rstrip())
+                    key = elems[3]
+                    date = elems[0] + ' ' + elems[1]
+                    try:
+                        if seen[key]['first'] > date:
+                            seen[key]['first'] = date
+                        if seen[key]['last'] < date:
+                            seen[key]['last'] = date
+                    except:
+                        seen[key] = {}
                         seen[key]['first'] = date
-                    if seen[key]['last'] < date:
                         seen[key]['last'] = date
-                except:
-                    seen[key] = {}
-                    seen[key]['first'] = date
-                    seen[key]['last'] = date
+        except IOError as e:
+            print "[OSS] I/O error: %s" % e.strerror
+            hint = 'Keine geloggten Unique EMMs gefunden.'
+            if self.emmlogdir[0:8] == '/var/log':
+                hint = 'Keine EMMs. Tipp: "emmlogdir" in %s/oscam.conf löschen.' % self.confdir 
 
-        keys = sorted(seen, key=getitem, reverse=True)
-        for key in keys:
-            payload = key[0:6] + ' ' + key[6:8] + ' ######## ' + key[16:30] + ' ...'
-            ret.append( ( self.formatDate(seen[key]['first']), self.formatDate(seen[key]['last']), payload, key) )
-        return ret
+        if seen:
+            keys = sorted(seen, key=getitem, reverse=True)
+            for key in keys:
+                payload = key[0:6] + ' ' + key[6:8] + ' ######## ' + key[16:30] + ' ...'
+                ret.append( ( self.formatDate(seen[key]['first']), self.formatDate(seen[key]['last']), payload, key) )
+                
+        return { 'emm': ret, 'hint': hint }
     
 
 class OscamWebif:
@@ -105,13 +116,18 @@ class OscamWebif:
         
         self.timer = eTimer()
         self.timer.callback.append(self.extractPayload)
+        
+        if password:
+            password = '########'
+        print "[OSS] OscamWebif(%s, %s, %s, %s)" % (host, port, user, password)
 
     def _get(self,url):
         if self.user:
-            status = requests.get(url, auth=requests.auth.HTTPDigestAuth(self.user, self.password)).content
+            r = requests.get(url, auth=requests.auth.HTTPDigestAuth(self.user, self.password))
         else:
-            status = requests.get(url).content
-        return status
+            r = requests.get(url)
+        print "[OSS] URL: %s [%s]" % (url, r.status_code)
+        return r.text
     
     def getStatus(self):
         url = self.webif+'/oscamapi.json?part=status'
@@ -170,7 +186,6 @@ class OscamWebif:
     #
     def extractPayload(self):
         url = self.webif+'/logpoll.html?debug=0'
-        print "OSS] call:", url
         logpoll = self._get(url)
         payload = None
         try:
@@ -222,7 +237,7 @@ class OscamWebif:
         return { 'tiers': tiers, 'expires': expires }
 
 class OscamStatus(Screen):
-    version = "2016-10-09 0.4"
+    version = "2016-10-09 0.5"
     skin = { "fhd": """
         <screen name="OscamStatus" position="0,0" size="1920,1080" title="Oscam Status" flags="wfNoBorder">
             <widget name="expires" position="20,20" size="600,36" font="Regular;25" />
@@ -313,51 +328,50 @@ class OscamStatus(Screen):
 	self.skin = OscamStatus.skin[self.useskin]
         
 	Screen.__init__(self, session)
-        self["actions"] =  ActionMap(["ColorActions", "WizardActions"], {
+        self['actions'] =  ActionMap(['ColorActions', 'WizardActions'], {
                 "back": self.cancel,
                 "ok": self.ok,
                 "red": self.red,
         }, -1)
         
-        self["key_red"] = Label(_("Payload ermitteln"))
-        self["key_green"] = Label()
-        self["payload"] = Label(_("Payload: rot drücken"))
-        self["f0tier"] = Label(_("F0-Tier vorhanden: unbekannt"))
-        self["cardtype"] = Label()
+        self['key_red'] = Label(_("Payload ermitteln"))
+        self['key_green'] = Label()
+        self['payload'] = Label(_("Payload: rot drücken"))
+        self['f0tier'] = Label(_("F0-Tier vorhanden: unbekannt"))
+        self['cardtype'] = Label()
+        self['headline'] = Label()
         
         self.fetchStatus()
         if self.status:
-            self["headline"] = Label(_("Liste der gespeicherten EMMs - mit OK zum Schreiben auswählen."))
-
             if self.tiers:
                 if "00F0" in self.tiers:
                     f0text = _("ja")
                 else:
                     f0text = _("nein")
-                self["f0tier"].setText(_("F0-Tier vorhanden: %s") % f0text)
+                self['f0tier'].setText(_("F0-Tier vorhanden: %s") % f0text)
             
-            if self.status["caid"] == "09C4":
+            if self.status['caid'] == "09C4":
                 cardtype = "V13"
             else:
                 cardtype = "V14"
-            self["cardtype"].setText( _("Kartentyp: %s") % cardtype )
+            self['cardtype'].setText( _("Kartentyp: %s") % cardtype )
 
         else:
-            self["headline"] = Label(_("Ist Oscam gestartet? Läuft eine lokale V13/V14 Karte?"))
+            self['headline'].setText(_("Ist Oscam gestartet? Läuft eine lokale V13/V14 Karte?"))
 
         if self.expires:
-            self["expires"] = Label(_("Karte läuft ab am: %s") % str(self.expires))
+            self['expires'] = Label(_("Karte läuft ab am: %s") % str(self.expires))
         else:
-            self["expires"] = Label(_("Status konnte nicht ermittelt werden."))
+            self['expires'] = Label(_("Status konnte nicht ermittelt werden."))
             
-        self["emmlist"] = List(self.list)
+        self['emmlist'] = List(self.list)
 
 
     def cancel(self):
         self.close()
     
     def ok(self):
-        self.emmToWrite = str(self["emmlist"].getCurrent()[3])
+        self.emmToWrite = str(self['emmlist'].getCurrent()[3])
         if self.emmToWrite != "":
             self.session.openWithCallback(
                 self.writeEmm, 
@@ -382,7 +396,8 @@ class OscamStatus(Screen):
     #
     def getConfdirFromOscamHelp(self, oscam):
         process = subprocess.Popen(oscam + " --help | grep ConfigDir", shell=True, stdout=subprocess.PIPE)
-        for line in  process.communicate()[0].split("\n"):
+        for line in process.communicate()[0].split("\n"):
+            print "[OSS] Suche Confdir aus:", line
             m = re.search(":\s*(\S*)", line)
             if m:
                 return m.group(1)
@@ -395,6 +410,7 @@ class OscamStatus(Screen):
         confdir = None
         process = subprocess.Popen("ps axw | grep [o]scam", shell=True, stdout=subprocess.PIPE)
         for line in  process.communicate()[0].split("\n"):
+            print "[OSS] ", line
             #
             # Anhand des Parameters -c das Config-Dir finden
             #
@@ -420,6 +436,7 @@ class OscamStatus(Screen):
         # Jetzt aus der oscam.conf die Webif-Config auslesen
         #
         if confdir:
+            print "[OSS] benutze confdir:", confdir
             config = OscamConfig(confdir)
             user = config.getWebif()
             try:
@@ -439,8 +456,14 @@ class OscamStatus(Screen):
             # versuchen, aus dem Oscam-Config-Dir die unique EMMs zu holen
             #
             if self.status:
+                retemm = config.getSavedEmm(self.status['reader'])
+                if retemm['hint']:
+                    self['headline'].setText(retemm['hint'])
+                else:
+                    self['headline'].setText(_("Liste der gespeicherten EMMs - mit OK zum Schreiben auswählen."))
+
                 self.list = [ ("Erstes Vorkommen", "Letztes Vorkommen", "EMM", "")]
-                self.list.extend( config.getSavedEmm(self.status['reader']) )
+                self.list.extend( retemm['emm'] )
                 tiers = self.webif.getTiers(self.status['reader'])
                 self.tiers = tiers['tiers']
                 self.expires = tiers['expires']
@@ -458,14 +481,14 @@ class OscamStatus(Screen):
     def callbackWriteEmm(self):
         tiers = self.webif.getTiers(self.status['reader'])
         self.expires = tiers['expires']
-        self["expires"].setText(_("Karte läuft ab am: %s") % str(self.expires))
+        self['expires'].setText(_("Karte läuft ab am: %s") % str(self.expires))
 
     #
     # Den Payload ermitteln
     #
     def fetchPayload(self,retval):
         if retval:
-            self["payload"].setText(_("Payload wird ermittelt"))
+            self['payload'].setText(_("Payload wird ermittelt"))
             self.payload = self.webif.fetchPayload(self.callbackFetchPayload)
 
     #
@@ -474,9 +497,9 @@ class OscamStatus(Screen):
     def callbackFetchPayload(self,payload):
         self.payload = payload
         if self.payload:
-            self["payload"].setText(_("Payload: %s") % str(self.payload))
+            self['payload'].setText(_("Payload: %s") % str(self.payload))
         else:
-            self["payload"].setText(_("Payload konnte nicht ermittelt werden."))
+            self['payload'].setText(_("Payload konnte nicht ermittelt werden."))
         self.session.open(MessageBox, _("Der Payload ist: %s") % self.payload, MessageBox.TYPE_INFO)
     
     # Anhand der Desktop-Größe einige Variablen anpassen;
