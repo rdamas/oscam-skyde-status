@@ -75,18 +75,19 @@ class OscamConfig:
         try:
             with open(logfile, 'r') as log:
                 for line in log:
-                    elems = re.split(" +", line.rstrip())
-                    key = elems[3]
-                    date = elems[0] + ' ' + elems[1]
-                    try:
-                        if seen[key]['first'] > date:
+                    m = re.search("(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})\s+[0-9A-Z]{16}\s+([0-9A-F]+)\s+", line.rstrip())
+                    if m:
+                        date = m.group(1)
+                        key = m.group(2)
+                        try:
+                            if seen[key]['first'] > date:
+                                seen[key]['first'] = date
+                            if seen[key]['last'] < date:
+                                seen[key]['last'] = date
+                        except:
+                            seen[key] = {}
                             seen[key]['first'] = date
-                        if seen[key]['last'] < date:
                             seen[key]['last'] = date
-                    except:
-                        seen[key] = {}
-                        seen[key]['first'] = date
-                        seen[key]['last'] = date
         except IOError as e:
             print "[OSS] I/O error: %s" % e.strerror
             hint = 'Keine geloggten Unique EMMs gefunden.'
@@ -237,7 +238,7 @@ class OscamWebif:
         return { 'tiers': tiers, 'expires': expires }
 
 class OscamStatus(Screen):
-    version = "2016-10-10 0.5"
+    version = "2016-10-14 0.6"
     skin = { "fhd": """
         <screen name="OscamStatus" position="0,0" size="1920,1080" title="Oscam Status" flags="wfNoBorder">
             <widget name="expires" position="20,20" size="600,36" font="Regular;25" />
