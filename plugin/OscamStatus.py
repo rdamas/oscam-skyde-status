@@ -409,7 +409,7 @@ class OscamStatus(Screen):
         # In der Prozessliste einen laufenden Oscam-Prozess finden
         #
         confdir = None
-        process = subprocess.Popen("ps axw | grep [o]scam", shell=True, stdout=subprocess.PIPE)
+        process = subprocess.Popen("ps axw | grep -i [o]scam", shell=True, stdout=subprocess.PIPE)
         for line in  process.communicate()[0].split("\n"):
             print "[OSS] ", line
             #
