@@ -15,6 +15,12 @@ import re
 import requests
 import subprocess
 
+class WebifException(Exception):
+    def __init__(self, value):
+        self.value = value
+    def __str__(self):
+        return repr(self.value)
+
 class OscamConfig:
     """Auslesen der Config-Files einer laufenden Oscam-Installation
     
@@ -120,6 +126,8 @@ class OscamWebif:
         
         if password:
             password = '########'
+        if user:
+            user = '########'
         print "[OSS] OscamWebif(%s, %s, %s, %s)" % (host, port, user, password)
 
     def _get(self,url):
@@ -128,6 +136,8 @@ class OscamWebif:
         else:
             r = requests.get(url)
         print "[OSS] URL: %s [%s]" % (url, r.status_code)
+        if r.status_code != 200:
+            raise WebifException(r.status_code)
         return r.text
     
     def getStatus(self):
@@ -238,7 +248,7 @@ class OscamWebif:
         return { 'tiers': tiers, 'expires': expires }
 
 class OscamStatus(Screen):
-    version = "2016-10-14 0.6"
+    version = "2016-10-24 0.7"
     skin = { "fhd": """
         <screen name="OscamStatus" position="0,0" size="1920,1080" title="Oscam Status" flags="wfNoBorder">
             <widget name="expires" position="20,20" size="600,36" font="Regular;25" />
@@ -358,7 +368,10 @@ class OscamStatus(Screen):
             self['cardtype'].setText( _("Kartentyp: %s") % cardtype )
 
         else:
-            self['headline'].setText(_("Ist Oscam gestartet? Läuft eine lokale V13/V14 Karte?"))
+            if self.localhostAccess:
+                self['headline'].setText(_("Ist Oscam gestartet? Läuft eine lokale V13/V14 Karte?"))
+            else:
+                self['headline'].setText(_("In oscam.conf muss für 127.0.0.1 Zugriff erlaubt werden."))
 
         if self.expires:
             self['expires'] = Label(_("Karte läuft ab am: %s") % str(self.expires))
@@ -458,38 +471,61 @@ class OscamStatus(Screen):
             user = config.getWebif()
             try:
                 httpuser = user['httpuser']
-                httppwd = user['httppwd']
             except KeyError:
                 httpuser = None
+            try:
+                httppwd = user['httppwd']
+            except KeyError:
                 httppwd = None
+            
+            self.localhostAccess = True
+            try:
+                httpallowed = user['httpallowed']
+                if '127.0.0.' not in httpallowed and '::1' not in httpallowed:
+                    self.localhostAccess = False
+            except:
+                pass
+            
             #
             # Über die Oscam-Webapi V13/V14-Reader suchen
             #
             self.webif = OscamWebif('localhost', user['httpport'], httpuser, httppwd)
-            self.status = self.webif.getStatusSky()
+            try:
+                self.status = self.webif.getStatusSky()
+            except WebifException as e:
+                print "[OSS] catch exception", e.value
 
             if self.status:
                 # gespeicherte unique EMMs anzeigen
                 self.getSavedEmm(config)
                 
                 # Tier-IDs und Expire-Datum der Karte auslesen
-                tiers = self.webif.getTiers(self.status['reader'])
-                self.tiers = tiers['tiers']
-                self.expires = tiers['expires']
+                try:
+                    tiers = self.webif.getTiers(self.status['reader'])
+                    self.tiers = tiers['tiers']
+                    self.expires = tiers['expires']
+                except WebifException as e:
+                    print "[OSS] catch exception", e.value
     # 
     # Das ausgewählte EMM über das Webinterface auf die Karte schreiben
     #
     def writeEmm(self, retval):
         if retval:
-            self.webif.writeEmm(self.status['reader'], self.status['caid'], self.emmToWrite, self.callbackWriteEmm)
+            try:
+                self.webif.writeEmm(self.status['reader'], self.status['caid'], self.emmToWrite, self.callbackWriteEmm)
+            except WebifException as e:
+                print "[OSS] catch exception", e.value
     
     #
     # Callback vom Webif, wenn Payload auslesen fertig ist
     #
     def callbackWriteEmm(self):
-        tiers = self.webif.getTiers(self.status['reader'])
-        self.expires = tiers['expires']
-        self['expires'].setText(_("Karte läuft ab am: %s") % str(self.expires))
+        try:
+            tiers = self.webif.getTiers(self.status['reader'])
+            self.expires = tiers['expires']
+            self['expires'].setText(_("Karte läuft ab am: %s") % str(self.expires))
+        except WebifException as e:
+            print "[OSS] catch exception", e.value
 
     #
     # Den Payload ermitteln
@@ -497,7 +533,10 @@ class OscamStatus(Screen):
     def fetchPayload(self,retval):
         if retval:
             self['payload'].setText(_("Payload wird ermittelt"))
-            self.payload = self.webif.fetchPayload(self.callbackFetchPayload)
+            try:
+                self.payload = self.webif.fetchPayload(self.callbackFetchPayload)
+            except WebifException as e:
+                print "[OSS] catch exception", e.value
 
     #
     # Callback vom Webif, wenn Payload auslesen fertig ist
