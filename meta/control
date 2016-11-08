@@ -1,10 +1,10 @@
 Package: enigma2-plugin-oscam-skyde-status
 Replaces: enigma-plugin-oscam-skyde-status
 Priority: optional
-Version: 0.7
+Version: 0.8
 Architecture: all
 Maintainer: Robert Damas <https://github.com/rdamas>
 Description: Auslesen und Verlängern der Oscam-Entis einer V13 und V14
 Section: misc
-Depends: python-requests,python-subprocess,python-json
+Depends: python-requests,python-json
 Homepage: https://github.com/rdamas/oscam-skyde-status

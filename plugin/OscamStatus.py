@@ -11,9 +11,9 @@ from __init__ import _
 import base64
 import ConfigParser
 import json
+import os
 import re
 import requests
-import subprocess
 
 class WebifException(Exception):
     def __init__(self, value):
@@ -152,7 +152,7 @@ class OscamWebif:
     
     #
     # Das Oscam-JSON-API liefert alle nötigen Informationen, um
-    # festzustellen, ob es eine laufende lokale V13/V14 gibt.
+    # festzustellen, ob es eine laufende lokale V13/V14 oder Teleclub gibt.
     # Den Reader-Label sowie die CAID zurückgeben.
     #
     def getStatusSky(self):
@@ -166,7 +166,7 @@ class OscamWebif:
                 conn = client['connection']
                 if conn['$'] == 'CARDOK':
                     for ent in conn['entitlements']:
-                        if ent['caid'] in ['09C4', '098C']:
+                        if ent['caid'] in ['09C4', '098C', '09B6']:
                             reader = client['rname_enc']
                             caid = ent['caid']
                             break
@@ -210,7 +210,8 @@ class OscamWebif:
                     lookAhead -= 1
                     if lookAhead == 0:
                         payload = self.getPayloadFromLine(decoded)
-                        break
+                        foundPayloadHeader = False
+                        continue
                 if 'Decrypted payload' in decoded:
                     lookAhead = 2
                     foundPayloadHeader = True
@@ -248,7 +249,7 @@ class OscamWebif:
         return { 'tiers': tiers, 'expires': expires }
 
 class OscamStatus(Screen):
-    version = "2016-10-24 0.7"
+    version = "2016-11-08 0.8"
     skin = { "fhd": """
         <screen name="OscamStatus" position="0,0" size="1920,1080" title="Oscam Status" flags="wfNoBorder">
             <widget name="expires" position="20,20" size="600,36" font="Regular;25" />
@@ -406,45 +407,73 @@ class OscamStatus(Screen):
         )
     
     #
-    # Das Default-Oscam-Config-Dir ermitteln
+    # Look in oscam.version from temp file for ConfigDir parameter
+    # and return it.
     #
-    def determineConfdirFromOscamHelp(self, oscam):
-        process = subprocess.Popen(oscam + " --help | grep ConfigDir", shell=True, stdout=subprocess.PIPE)
-        for line in process.communicate()[0].split("\n"):
-            print "[OSS] Suche Confdir aus:", line
-            m = re.search(":\s*(\S*)", line)
-            if m:
-                return m.group(1)
+    def determineConfdirFromOscamTemp(self,tempdir):
+        try:
+            for line in open(os.path.join(tempdir, 'oscam.version'), 'rb'):
+                if 'ConfigDir:' in line:
+                    return line.split(":")[1].strip()
+        except:
+            print "[OSS] kann", tempdir, "nicht öffnen."
         return None
     
-    def determineOscamConfdir(self):
-        #
-        # In der Prozessliste einen laufenden Oscam-Prozess finden
-        #
+    #
+    # Find Oscam config dir from running Oscam process.
+    # Check if process was startet with param -c or -t
+    #
+    def determineConfdirFromProcesslist(self):
         confdir = None
-        process = subprocess.Popen("ps axw | grep -i [o]scam", shell=True, stdout=subprocess.PIPE)
-        for line in  process.communicate()[0].split("\n"):
-            print "[OSS] ", line
-            #
-            # Anhand des Parameters -c das Config-Dir finden
-            #
-            m = re.search(r"-c (\S+).*$", line)
-            if m:
-                confdir = m.group(1)
-                break
-            else:
-                #
-                # Oscam läuft, wurde aber nicht mit Parameter -c gestartet
-                # Dann kann das Config-Dir über Aufruf von oscam --help 
-                # ausgelesen werden. Zunächst einmal den Namen des laufenden
-                # Binaries ermitteln
-                #
-                m = re.search(r"\s(\S*oscam\S*)(\s|$)", line)
-                if m:
-                    oscam = m.group(1)
-                    confdir = self.determineConfdirFromOscamHelp(oscam)
-                    if confdir:
-                        break
+        tempdir = None
+
+        pids = [pid for pid in os.listdir('/proc') if pid.isdigit()]
+        for pid in pids:
+            try:
+                cmdline = open(os.path.join('/proc', pid, 'cmdline'), 'rb').read()
+                cmdpart = cmdline.lower().split('\0')
+                if '/oscam' in cmdpart[0]:
+                    nextIsConfDir = False
+                    nextIsTempDir = False
+                    for part in cmdpart:
+                        if part == '-c' or part == '--config-dir':
+                            nextIsConfDir = True
+                            continue
+                        if part == '-t' or part == '--temp-dir':
+                            nextIsTempDir = True
+                            continue
+                        if nextIsConfDir:
+                            confdir = part.rstrip('/')
+                            nextIsConfDir = False
+                        if nextIsTempDir:
+                            tempdir = part.rstrip('/')
+                            nextIsTempDir = False
+                    break
+            except IOError: # proc has already terminated
+                continue
+        
+        if confdir:
+            return confdir
+        
+        if tempdir:
+            return self.determineConfdirFromOscamTemp(tempdir)
+        
+        return None
+    
+    #
+    # Find out where oscam.conf lives.
+    # First try to to read out /tmp/.oscam/oscam.version
+    # If that does not exist, try to find it from running Oscam
+    #
+    def determineOscamConfdir(self):
+        tempdir = '/tmp/.oscam'
+        
+        if os.path.exists(tempdir):
+            confdir = self.determineConfdirFromOscamTemp(tempdir)
+        
+        if not confdir:
+            confdir = self.determineConfdirFromProcesslist()
+        
         return confdir
     
     #
@@ -460,6 +489,15 @@ class OscamStatus(Screen):
         self.list = [ ("Erstes Vorkommen", "Letztes Vorkommen", "EMM", "")]
         self.list.extend( retemm['emm'] )
     
+    #
+    # Read tier IDs und expire date from Oscam web interface.
+    #
+    # set self.expires - expire date from webif
+    # set self.tiers - tiers list from webif
+    # set self.localhostAccess - can localhost access webif
+    # set self.webif - @class OscamWebif
+    # set self.status - reader and caid for Sky from webif
+    #
     def fetchStatus(self):
         oscamConfdir = self.determineOscamConfdir()
         #
@@ -506,6 +544,7 @@ class OscamStatus(Screen):
                     self.expires = tiers['expires']
                 except WebifException as e:
                     print "[OSS] catch exception", e.value
+
     # 
     # Das ausgewählte EMM über das Webinterface auf die Karte schreiben
     #
