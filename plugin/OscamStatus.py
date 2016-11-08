@@ -131,13 +131,17 @@ class OscamWebif:
         print "[OSS] OscamWebif(%s, %s, %s, %s)" % (host, port, user, password)
 
     def _get(self,url):
-        if self.user:
-            r = requests.get(url, auth=requests.auth.HTTPDigestAuth(self.user, self.password))
-        else:
-            r = requests.get(url)
-        print "[OSS] URL: %s [%s]" % (url, r.status_code)
-        if r.status_code != 200:
-            raise WebifException(r.status_code)
+        try:
+            if self.user:
+                r = requests.get(url, auth=requests.auth.HTTPDigestAuth(self.user, self.password))
+            else:
+                r = requests.get(url)
+            print "[OSS] URL: %s [%s]" % (url, r.status_code)
+            if r.status_code != 200:
+                raise WebifException(r.status_code)
+        except Exception as e:
+            print "[OSS]", e
+            raise WebifException(521)
         return r.text
     
     def getStatus(self):
