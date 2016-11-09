@@ -31,31 +31,36 @@ class OscamConfig:
     """
     def __init__(self, confdir):
         self.confdir = confdir
-        self.cp = ConfigParser.ConfigParser()
+        self.cp = ConfigParser.SafeConfigParser()
         self.webif = None
         self.emmlogdir = None
+        self._readOscamUser()
     
-    def readOscamUser(self):
+    def _readOscamUser(self):
         read = self.cp.read(self.confdir + '/oscam.conf')
         if read:
-            try:
-                self.webif = self.cp.items('webif')
-            except ConfigParser.NoSectionError:
-                pass
-
             try:
                 self.emmlogdir = self.cp.get('global', 'emmlogdir')
             except ConfigParser.NoOptionError:
                 self.emmlogdir = self.confdir
+
+            try:
+                hostname = self.cp.get('global', 'serverip')
+            except ConfigParser.NoOptionError:
+                hostname = 'localhost'
+
+            try:
+                self.cp.set('webif', 'hostname', hostname)
+                self.webif = self.cp.items('webif')
+            except ConfigParser.NoSectionError:
+                pass
     
     def getWebif(self):
-        if not self.webif:
-            self.readOscamUser()
         if self.webif:
             return dict(self.webif)
         return None
     
-    def formatDate(self, date):
+    def _formatDate(self, date):
         m = re.match("(\d+)/(\d+)/(\d+) (.*)", date)
         if m:
             return m.group(3)+"."+m.group(2)+"."+m.group(1)+" "+m.group(4)
@@ -67,9 +72,6 @@ class OscamConfig:
     # am TV die Serial und Data unkenntlich machen.
     #
     def getSavedEmm(self, reader):
-
-        def getitem(x):
-            return seen[x]['last']
 
         logfile = self.emmlogdir + '/' + reader + '_unique_emm.log'
         seen = {}
@@ -101,10 +103,10 @@ class OscamConfig:
                 hint = 'Keine EMMs. Tipp: "emmlogdir" in %s/oscam.conf löschen.' % self.confdir 
 
         if seen:
-            keys = sorted(seen, key=getitem, reverse=True)
+            keys = sorted(seen, key=lambda x: seen[x]['last'], reverse=True)
             for key in keys:
                 payload = key[0:6] + ' ' + key[6:8] + ' ######## ' + key[16:30] + ' ...'
-                ret.append( ( self.formatDate(seen[key]['first']), self.formatDate(seen[key]['last']), payload, key) )
+                ret.append( ( self._formatDate(seen[key]['first']), self._formatDate(seen[key]['last']), payload, key) )
                 
         return { 'emm': ret, 'hint': hint }
     
@@ -148,7 +150,7 @@ class OscamWebif:
         url = self.webif+'/oscamapi.json?part=status'
         return self._get(url)
 
-    def formatDate(self, date):
+    def _formatDate(self, date):
         m = re.match("(\d+)-(\d+)-(\d+)T.*", date)
         if m:
             return m.group(3)+". "+m.group(2)+". "+m.group(1)
@@ -247,13 +249,13 @@ class OscamWebif:
             for line in obj['oscam']['entitlements']:
                 tiers.append( line['id'][-4:] )
                 if not expires and line['id'][-4:-2] == '00':
-                    expires = self.formatDate(line['expireDate'])
+                    expires = self._formatDate(line['expireDate'])
         except:
             pass
         return { 'tiers': tiers, 'expires': expires }
 
 class OscamStatus(Screen):
-    version = "2016-11-08 0.8"
+    version = "2016-11-09 0.8"
     skin = { "fhd": """
         <screen name="OscamStatus" position="0,0" size="1920,1080" title="Oscam Status" flags="wfNoBorder">
             <widget name="expires" position="20,20" size="600,36" font="Regular;25" />
@@ -531,7 +533,7 @@ class OscamStatus(Screen):
             #
             # Über die Oscam-Webapi V13/V14-Reader suchen
             #
-            self.webif = OscamWebif('localhost', user['httpport'], httpuser, httppwd)
+            self.webif = OscamWebif(user['hostname'], user['httpport'], httpuser, httppwd)
             try:
                 self.status = self.webif.getStatusSky()
             except WebifException as e:
