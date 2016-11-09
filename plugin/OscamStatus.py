@@ -370,8 +370,10 @@ class OscamStatus(Screen):
             
             if self.status['caid'] == "09C4":
                 cardtype = "V13"
-            else:
+            elif self.status['caid'] == "098C":
                 cardtype = "V14"
+            else:
+                cardtype = "TC"
             self['cardtype'].setText( _("Kartentyp: %s") % cardtype )
 
         else:
