@@ -1,4 +1,11 @@
 # -*- coding: utf-8 -*-
+import base64
+import ConfigParser
+import json
+import os
+import re
+import requests
+
 from enigma import eTimer, getDesktop
 from Components.ActionMap import ActionMap
 from Components.Label import Label
@@ -8,18 +15,8 @@ from Screens.Screen import Screen
 
 from __init__ import _
 
-import base64
-import ConfigParser
-import json
-import os
-import re
-import requests
-
 class WebifException(Exception):
-    def __init__(self, value):
-        self.value = value
-    def __str__(self):
-        return repr(self.value)
+    pass
 
 class OscamConfig:
     """Auslesen der Config-Files einer laufenden Oscam-Installation
@@ -61,7 +58,7 @@ class OscamConfig:
         return None
     
     def _formatDate(self, date):
-        m = re.match("(\d+)/(\d+)/(\d+) (.*)", date)
+        m = re.match(r"(\d+)/(\d+)/(\d+) (.*)", date)
         if m:
             return m.group(3)+"."+m.group(2)+"."+m.group(1)+" "+m.group(4)
         return date
@@ -83,7 +80,7 @@ class OscamConfig:
         try:
             with open(logfile, 'r') as log:
                 for line in log:
-                    m = re.search("(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})\s+[0-9A-Z]{16}\s+([0-9A-F]+)\s+", line.rstrip())
+                    m = re.search(r"(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})\s+[0-9A-Z]{16}\s+([0-9A-F]+)\s+", line.rstrip())
                     if m:
                         date = m.group(1)
                         key = m.group(2)
@@ -92,7 +89,7 @@ class OscamConfig:
                                 seen[key]['first'] = date
                             if seen[key]['last'] < date:
                                 seen[key]['last'] = date
-                        except:
+                        except KeyError:
                             seen[key] = {}
                             seen[key]['first'] = date
                             seen[key]['last'] = date
@@ -126,6 +123,8 @@ class OscamWebif:
         self.timer = eTimer()
         self.timer.callback.append(self.extractPayload)
         
+        self.callback = None
+        
         if password:
             password = '########'
         if user:
@@ -151,7 +150,7 @@ class OscamWebif:
         return self._get(url)
 
     def _formatDate(self, date):
-        m = re.match("(\d+)-(\d+)-(\d+)T.*", date)
+        m = re.match(r"(\d+)-(\d+)-(\d+)T.*", date)
         if m:
             return m.group(3)+". "+m.group(2)+". "+m.group(1)
         return date
@@ -210,6 +209,7 @@ class OscamWebif:
             lines = obj['oscam']['lines']
 
             foundPayloadHeader = False
+            lookAhead = 2
             for line in lines:
                 decoded = base64.b64decode(line['line'])
                 if foundPayloadHeader:
@@ -223,9 +223,9 @@ class OscamWebif:
                     foundPayloadHeader = True
         except Exception as e:
             print "[OSS]", e
-            pass
         
-        return self.callback(payload)
+        if self.callback:
+            return self.callback(payload)
 
     #
     # Den Payload auslesen
@@ -254,8 +254,160 @@ class OscamWebif:
             pass
         return { 'tiers': tiers, 'expires': expires }
 
-class OscamStatus(Screen):
-    version = "2016-11-09 0.8"
+
+
+class CardStatus:
+    
+    def __init__(self, session):
+        self.session = session
+        
+        self.oscamConfdir = None
+        self.oscamWebifSupport = None
+        self.oscamLivelogSupport = None
+        self.localhostAccess = None
+        self.status = None
+        self.tiers = None
+        self.hint = None
+        self.expires = None
+        self.list = None
+        self.webif = None
+        self.oscamConfig = None
+        
+        self.getOscamInformation()
+
+    #
+    # Look in oscam.version from temp file for ConfigDir parameter
+    # and return it.
+    #
+    def readOscamVersion(self, tempdir):
+        try:
+            for line in open(os.path.join(tempdir, 'oscam.version'), 'rb'):
+                if 'ConfigDir:' in line:
+                    self.oscamConfdir = line.split(":")[1].strip()
+                    
+                if 'Web interface support:' in line:
+                    self.oscamWebifSupport = line.split(":")[1].strip() == 'yes'
+                    
+                if 'LiveLog support:' in line:
+                    self.oscamLivelogSupport = line.split(":")[1].strip() == 'yes'
+                    
+        except:
+            print "[OSS] kann", tempdir, "nicht öffnen."
+    
+    #
+    # Find Oscam temp dir from running Oscam process.
+    # Check if process was startet with param -t
+    #
+    def getOscamTempdir(self):
+        tempdir = None
+
+        pids = [pid for pid in os.listdir('/proc') if pid.isdigit()]
+        for pid in pids:
+            try:
+                cmdline = open(os.path.join('/proc', pid, 'cmdline'), 'rb').read()
+                cmdpart = cmdline.lower().split('\0')
+                if '/oscam' in cmdpart[0]:
+                    nextIsTempDir = False
+                    for part in cmdpart:
+                        if part == '-t' or part == '--temp-dir':
+                            nextIsTempDir = True
+                            continue
+                        if nextIsTempDir:
+                            tempdir = part.rstrip('/')
+                            nextIsTempDir = False
+                    break
+            except IOError: # proc has terminated
+                continue
+        
+        return tempdir
+    
+    #
+    # Find out where oscam.conf lives.
+    # First try to to read out /tmp/.oscam/oscam.version
+    # If that does not exist, try to find it from running Oscam
+    #
+    def getOscamInformation(self):
+        tempdir = '/tmp/.oscam'
+        
+        if os.path.exists(tempdir):
+            self.readOscamVersion(tempdir)
+            return
+        
+        tempdir = self.getOscamTempdir()
+        if tempdir and os.path.exists(tempdir):
+            self.readOscamVersion(tempdir)
+    
+    #
+    #
+    #
+    def getOscamWebif(self):
+        print "[OSS] benutze Oscam Confdir:", self.oscamConfdir
+        user = self.oscamConfig.getWebif()
+        try:
+            httpuser = user['httpuser']
+        except KeyError:
+            httpuser = None
+        try:
+            httppwd = user['httppwd']
+        except KeyError:
+            httppwd = None
+
+        self.localhostAccess = True
+        try:
+            httpallowed = user['httpallowed']
+            if '127.0.0.' not in httpallowed and '::1' not in httpallowed:
+                self.localhostAccess = False
+        except:
+            pass
+
+        return OscamWebif(user['hostname'], user['httpport'], httpuser, httppwd)
+    
+    #
+    # Read tier IDs und expire date from Oscam web interface.
+    #
+    # set self.expires - expire date from webif
+    # set self.tiers - tiers list from webif
+    # set self.localhostAccess - can localhost access webif
+    # set self.webif - @class OscamWebif
+    # set self.status - reader and caid for Sky from webif
+    #
+    def getCardStatus(self):
+        #
+        # Jetzt aus der oscam.conf die Webif-Config auslesen
+        #
+        if self.oscamConfdir:
+            # Über die Oscam-Webapi V13/V14-Reader suchen
+            self.oscamConfig = OscamConfig(self.oscamConfdir)
+            self.webif = self.getOscamWebif()
+            try:
+                self.status = self.webif.getStatusSky()
+            except WebifException as e:
+                print "[OSS] catch exception", e
+
+            if self.status:
+                # gespeicherte unique EMMs anzeigen
+                self.getSavedEmm()
+                
+                # Tier-IDs und Expire-Datum der Karte auslesen
+                try:
+                    tiers = self.webif.getTiers(self.status['reader'])
+                    self.tiers = tiers['tiers']
+                    self.expires = tiers['expires']
+                except WebifException as e:
+                    print "[OSS] catch exception", e
+
+    #
+    # Versuchen, aus dem Oscam-Config-Dir die unique EMMs zu holen
+    #
+    def getSavedEmm(self):
+        retemm = self.oscamConfig.getSavedEmm(self.status['reader'])
+        self.hint = retemm['hint']
+        self.list = [ ("Erstes Vorkommen", "Letztes Vorkommen", "EMM", "")]
+        self.list.extend( retemm['emm'] )
+    
+
+class OscamStatus(Screen, CardStatus):
+    version = "2016-11-15 0.9a1"
     skin = { "fhd": """
         <screen name="OscamStatus" position="0,0" size="1920,1080" title="Oscam Status" flags="wfNoBorder">
             <widget name="expires" position="20,20" size="600,36" font="Regular;25" />
@@ -341,54 +493,32 @@ class OscamStatus(Screen):
         self.list = None
         self.tiers = None
         self.expires = None
+        self.hint = None
+        self.emmToWrite = None
+        self.payload = None
 
         self.adaptScreen()
-	self.skin = OscamStatus.skin[self.useskin]
+        self.skin = OscamStatus.skin[self.useskin]
         
-	Screen.__init__(self, session)
+        CardStatus.__init__(self, session)
+        Screen.__init__(self, session)
+
         self['actions'] =  ActionMap(['ColorActions', 'WizardActions'], {
-                "back": self.cancel,
-                "ok": self.ok,
-                "red": self.red,
+            "back": self.cancel,
+            "ok": self.ok,
+            "red": self.red,
         }, -1)
         
         self['key_red'] = Label(_("Payload ermitteln"))
         self['key_green'] = Label()
         self['payload'] = Label(_("Payload: rot drücken"))
-        self['f0tier'] = Label(_("F0-Tier vorhanden: unbekannt"))
+        self['f0tier'] = Label()
         self['cardtype'] = Label()
         self['headline'] = Label()
+        self['expires'] = Label()
+        self['emmlist'] = List()
         
-        self.fetchStatus()
-        if self.status:
-            if self.tiers:
-                if "00F0" in self.tiers:
-                    f0text = _("ja")
-                else:
-                    f0text = _("nein")
-                self['f0tier'].setText(_("F0-Tier vorhanden: %s") % f0text)
-            
-            if self.status['caid'] == "09C4":
-                cardtype = "V13"
-            elif self.status['caid'] == "098C":
-                cardtype = "V14"
-            else:
-                cardtype = "TC"
-            self['cardtype'].setText( _("Kartentyp: %s") % cardtype )
-
-        else:
-            if self.localhostAccess:
-                self['headline'].setText(_("Ist Oscam gestartet? Läuft eine lokale V13/V14 Karte?"))
-            else:
-                self['headline'].setText(_("In oscam.conf muss für 127.0.0.1 Zugriff erlaubt werden."))
-
-        if self.expires:
-            self['expires'] = Label(_("Karte läuft ab am: %s") % str(self.expires))
-        else:
-            self['expires'] = Label(_("Status konnte nicht ermittelt werden."))
-            
-        self['emmlist'] = List(self.list)
-
+        self.onLayoutFinish.append(self.showCardStatus)
 
     def cancel(self):
         self.close()
@@ -414,145 +544,52 @@ class OscamStatus(Screen):
             timeout = -1
         )
     
-    #
-    # Look in oscam.version from temp file for ConfigDir parameter
-    # and return it.
-    #
-    def determineConfdirFromOscamTemp(self,tempdir):
-        try:
-            for line in open(os.path.join(tempdir, 'oscam.version'), 'rb'):
-                if 'ConfigDir:' in line:
-                    return line.split(":")[1].strip()
-        except:
-            print "[OSS] kann", tempdir, "nicht öffnen."
-        return None
+    def getF0text(self):
+        f0text = _("unbekannt")
+        if self.tiers:
+            if "00F0" in self.tiers:
+                f0text = _("ja")
+            else:
+                f0text = _("nein")
+        return f0text
     
-    #
-    # Find Oscam config dir from running Oscam process.
-    # Check if process was startet with param -c or -t
-    #
-    def determineConfdirFromProcesslist(self):
-        confdir = None
-        tempdir = None
+    def getCardtype(self):
+        cardtype = "unbekannt"
+        if self.status:
+            caid = self.status['caid']
+            if caid == "09C4":
+                cardtype = "V13"
+            elif caid == "098C":
+                cardtype = "V14"
+            elif caid == "09B6":
+                cardtype = "Teleclub"
+        return cardtype
+    
+    def showCardStatus(self):
+        self.getCardStatus()
+    
+        self['f0tier'].setText(_("F0-Tier vorhanden: %s") % self.getF0text() )
+        self['cardtype'].setText( _("Kartentyp: %s") % self.getCardtype() )
+        
+        if self.status:
+            if self.hint:
+                self['headline'].setText(self.hint)
+            else:
+                self['headline'].setText(_("Liste der gespeicherten EMMs - mit OK zum Schreiben auswählen."))
 
-        pids = [pid for pid in os.listdir('/proc') if pid.isdigit()]
-        for pid in pids:
-            try:
-                cmdline = open(os.path.join('/proc', pid, 'cmdline'), 'rb').read()
-                cmdpart = cmdline.lower().split('\0')
-                if '/oscam' in cmdpart[0]:
-                    nextIsConfDir = False
-                    nextIsTempDir = False
-                    for part in cmdpart:
-                        if part == '-c' or part == '--config-dir':
-                            nextIsConfDir = True
-                            continue
-                        if part == '-t' or part == '--temp-dir':
-                            nextIsTempDir = True
-                            continue
-                        if nextIsConfDir:
-                            confdir = part.rstrip('/')
-                            nextIsConfDir = False
-                        if nextIsTempDir:
-                            tempdir = part.rstrip('/')
-                            nextIsTempDir = False
-                    break
-            except IOError: # proc has already terminated
-                continue
-        
-        if confdir:
-            return confdir
-        
-        if tempdir:
-            return self.determineConfdirFromOscamTemp(tempdir)
-        
-        return None
-    
-    #
-    # Find out where oscam.conf lives.
-    # First try to to read out /tmp/.oscam/oscam.version
-    # If that does not exist, try to find it from running Oscam
-    #
-    def determineOscamConfdir(self):
-        tempdir = '/tmp/.oscam'
-        
-        if os.path.exists(tempdir):
-            confdir = self.determineConfdirFromOscamTemp(tempdir)
-        
-        if not confdir:
-            confdir = self.determineConfdirFromProcesslist()
-        
-        return confdir
-    
-    #
-    # Versuchen, aus dem Oscam-Config-Dir die unique EMMs zu holen
-    #
-    def getSavedEmm(self, config):
-        retemm = config.getSavedEmm(self.status['reader'])
-        if retemm['hint']:
-            self['headline'].setText(retemm['hint'])
+            self['emmlist'].setList(self.list)
+            
         else:
-            self['headline'].setText(_("Liste der gespeicherten EMMs - mit OK zum Schreiben auswählen."))
+            if self.localhostAccess:
+                self['headline'].setText(_("Ist Oscam gestartet? Läuft eine lokale V13/V14 Karte?"))
+            else:
+                self['headline'].setText(_("In oscam.conf muss für 127.0.0.1 Zugriff erlaubt werden."))
 
-        self.list = [ ("Erstes Vorkommen", "Letztes Vorkommen", "EMM", "")]
-        self.list.extend( retemm['emm'] )
-    
-    #
-    # Read tier IDs und expire date from Oscam web interface.
-    #
-    # set self.expires - expire date from webif
-    # set self.tiers - tiers list from webif
-    # set self.localhostAccess - can localhost access webif
-    # set self.webif - @class OscamWebif
-    # set self.status - reader and caid for Sky from webif
-    #
-    def fetchStatus(self):
-        oscamConfdir = self.determineOscamConfdir()
-        #
-        # Jetzt aus der oscam.conf die Webif-Config auslesen
-        #
-        if oscamConfdir:
-            print "[OSS] benutze Oscam Confdir:", oscamConfdir
-            config = OscamConfig(oscamConfdir)
-            user = config.getWebif()
-            try:
-                httpuser = user['httpuser']
-            except KeyError:
-                httpuser = None
-            try:
-                httppwd = user['httppwd']
-            except KeyError:
-                httppwd = None
+        if self.expires:
+            self['expires'].setText(_("Karte läuft ab am: %s") % str(self.expires))
+        else:
+            self['expires'].setText(_("Status konnte nicht ermittelt werden."))
             
-            self.localhostAccess = True
-            try:
-                httpallowed = user['httpallowed']
-                if '127.0.0.' not in httpallowed and '::1' not in httpallowed:
-                    self.localhostAccess = False
-            except:
-                pass
-            
-            #
-            # Über die Oscam-Webapi V13/V14-Reader suchen
-            #
-            self.webif = OscamWebif(user['hostname'], user['httpport'], httpuser, httppwd)
-            try:
-                self.status = self.webif.getStatusSky()
-            except WebifException as e:
-                print "[OSS] catch exception", e.value
-
-            if self.status:
-                # gespeicherte unique EMMs anzeigen
-                self.getSavedEmm(config)
-                
-                # Tier-IDs und Expire-Datum der Karte auslesen
-                try:
-                    tiers = self.webif.getTiers(self.status['reader'])
-                    self.tiers = tiers['tiers']
-                    self.expires = tiers['expires']
-                except WebifException as e:
-                    print "[OSS] catch exception", e.value
-
     # 
     # Das ausgewählte EMM über das Webinterface auf die Karte schreiben
     #
@@ -561,7 +598,7 @@ class OscamStatus(Screen):
             try:
                 self.webif.writeEmm(self.status['reader'], self.status['caid'], self.emmToWrite, self.callbackWriteEmm)
             except WebifException as e:
-                print "[OSS] catch exception", e.value
+                print "[OSS] catch exception", e
     
     #
     # Callback vom Webif, wenn Payload auslesen fertig ist
@@ -572,23 +609,24 @@ class OscamStatus(Screen):
             self.expires = tiers['expires']
             self['expires'].setText(_("Karte läuft ab am: %s") % str(self.expires))
         except WebifException as e:
-            print "[OSS] catch exception", e.value
+            print "[OSS] catch exception", e
+
 
     #
     # Den Payload ermitteln
     #
-    def fetchPayload(self,retval):
+    def fetchPayload(self, retval):
         if retval:
             self['payload'].setText(_("Payload wird ermittelt"))
             try:
-                self.payload = self.webif.fetchPayload(self.callbackFetchPayload)
+                self.webif.fetchPayload(self.callbackFetchPayload)
             except WebifException as e:
-                print "[OSS] catch exception", e.value
+                print "[OSS] catch exception", e
 
     #
     # Callback vom Webif, wenn Payload auslesen fertig ist
     #
-    def callbackFetchPayload(self,payload):
+    def callbackFetchPayload(self, payload):
         self.payload = payload
         if self.payload:
             self['payload'].setText(_("Payload: %s") % str(self.payload))
@@ -596,8 +634,10 @@ class OscamStatus(Screen):
             self['payload'].setText(_("Payload konnte nicht ermittelt werden."))
         self.session.open(MessageBox, _("Der Payload ist: %s") % self.payload, MessageBox.TYPE_INFO)
     
-    # Anhand der Desktop-Größe einige Variablen anpassen;
-    # so sollte es egal sein, ob ein SD, HD oder FHD-Skin benutzt wird.
+    #
+    # Desktop-Größe ermitteln.
+    # Anhand der Desktop-Größe wird der interne Skin ausgewählt.
+    #
     def adaptScreen(self):
         fb_w = getDesktop(0).size().width()
         if fb_w < 1920:
