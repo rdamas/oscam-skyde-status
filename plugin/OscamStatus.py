@@ -75,7 +75,7 @@ class OscamConfig:
         ret = []
         hint = ''
 
-        print "[OSS] versuche '%s' zu lesen" % logfile
+        print "[OSS OscamConfig.getSavedEmm] versuche '%s' zu lesen" % logfile
 
         try:
             with open(logfile, 'r') as log:
@@ -94,7 +94,7 @@ class OscamConfig:
                             seen[key]['first'] = date
                             seen[key]['last'] = date
         except IOError as e:
-            print "[OSS] I/O error: %s" % e.strerror
+            print "[OSS OscamConfig.getSavedEmm] I/O error: %s" % e.strerror
             hint = 'Keine geloggten Unique EMMs gefunden.'
             if self.emmlogdir[0:8] == '/var/log':
                 hint = 'Keine EMMs. Tipp: "emmlogdir" in %s/oscam.conf löschen.' % self.confdir 
@@ -129,7 +129,7 @@ class OscamWebif:
             password = '########'
         if user:
             user = '########'
-        print "[OSS] OscamWebif(%s, %s, %s, %s)" % (host, port, user, password)
+        print "[OSS OscamWebif.__init__] OscamWebif(%s, %s, %s, %s)" % (host, port, user, password)
 
     def _get(self,url):
         try:
@@ -137,11 +137,11 @@ class OscamWebif:
                 r = requests.get(url, auth=requests.auth.HTTPDigestAuth(self.user, self.password))
             else:
                 r = requests.get(url)
-            print "[OSS] URL: %s [%s]" % (url, r.status_code)
+            print "[OSS OscamWebif._get] URL: %s => %s" % (url, r.status_code)
             if r.status_code != 200:
                 raise WebifException(r.status_code)
         except Exception as e:
-            print "[OSS]", e
+            print "[OSS OscamWebif._get] catch exception", e
             raise WebifException(521)
         return r.text
     
@@ -222,7 +222,7 @@ class OscamWebif:
                     lookAhead = 2
                     foundPayloadHeader = True
         except Exception as e:
-            print "[OSS]", e
+            print "[OSS OscamWebif.extractPayload] catch exception", e
         
         if self.callback:
             return self.callback(payload)
@@ -257,6 +257,10 @@ class OscamWebif:
 
 
 class CardStatus:
+    """Class that holds gathered information from running Oscam instance.
+    Is independent of enigma2 session, so testably without running enigma2.
+    Is inherited from OscamStatus.
+    """
     
     def __init__(self, session):
         self.session = session
@@ -284,15 +288,18 @@ class CardStatus:
             for line in open(os.path.join(tempdir, 'oscam.version'), 'rb'):
                 if 'ConfigDir:' in line:
                     self.oscamConfdir = line.split(":")[1].strip()
+                    print "[OSS CardStatus.readOscamVersion] confdir:", self.oscamConfdir
                     
                 if 'Web interface support:' in line:
                     self.oscamWebifSupport = line.split(":")[1].strip() == 'yes'
+                    print "[OSS CardStatus.readOscamVersion] webif support:", self.oscamWebifSupport
                     
                 if 'LiveLog support:' in line:
                     self.oscamLivelogSupport = line.split(":")[1].strip() == 'yes'
+                    print "[OSS CardStatus.readOscamVersion] livelog support:", self.oscamLivelogSupport
                     
         except:
-            print "[OSS] kann", tempdir, "nicht öffnen."
+            print "[OSS CardStatus.readOscamVersion] kann", tempdir, "nicht öffnen."
     
     #
     # Find Oscam temp dir from running Oscam process.
@@ -306,10 +313,16 @@ class CardStatus:
             try:
                 cmdline = open(os.path.join('/proc', pid, 'cmdline'), 'rb').read()
                 cmdpart = cmdline.lower().split('\0')
-                if '/oscam' in cmdpart[0]:
+                # @tested
+                if '/oscam' in cmdpart[0] or cmdpart[0][0:5] == 'oscam':
                     nextIsTempDir = False
                     for part in cmdpart:
-                        if part == '-t' or part == '--temp-dir':
+                        # @tested
+                        if '--temp-dir' in part:
+                            tempdir = part[11:]
+                            break
+                        # @tested
+                        if part == '-t':
                             nextIsTempDir = True
                             continue
                         if nextIsTempDir:
@@ -329,38 +342,45 @@ class CardStatus:
     def getOscamInformation(self):
         tempdir = '/tmp/.oscam'
         
+        # @tested
         if os.path.exists(tempdir):
             self.readOscamVersion(tempdir)
             return
         
+        # @tested
         tempdir = self.getOscamTempdir()
         if tempdir and os.path.exists(tempdir):
             self.readOscamVersion(tempdir)
     
     #
-    #
+    # Get an OscamWebif object for communication via Web interface.
     #
     def getOscamWebif(self):
-        print "[OSS] benutze Oscam Confdir:", self.oscamConfdir
-        user = self.oscamConfig.getWebif()
-        try:
-            httpuser = user['httpuser']
-        except KeyError:
-            httpuser = None
-        try:
-            httppwd = user['httppwd']
-        except KeyError:
-            httppwd = None
+        if self.oscamWebifSupport:
+            user = self.oscamConfig.getWebif()
+            try:
+                httpuser = user['httpuser']
+            except KeyError:
+                httpuser = None
+            try:
+                httppwd = user['httppwd']
+            except KeyError:
+                httppwd = None
 
-        self.localhostAccess = True
-        try:
-            httpallowed = user['httpallowed']
-            if '127.0.0.' not in httpallowed and '::1' not in httpallowed:
-                self.localhostAccess = False
-        except:
-            pass
+            self.localhostAccess = True
+            try:
+                httpallowed = user['httpallowed']
+                print "[OSS CardStatus.getOscamWebif] httpallowed:", httpallowed
+                if '127.0.0.' not in httpallowed and '::1' not in httpallowed:
+                    self.localhostAccess = False
+            except:
+                pass
 
-        return OscamWebif(user['hostname'], user['httpport'], httpuser, httppwd)
+            return OscamWebif(user['hostname'], user['httpport'], httpuser, httppwd)
+        
+        else:
+            print "[OSS CardStatus.getOscamWebif] no webif support"
+            raise WebifException(501)
     
     #
     # Read tier IDs und expire date from Oscam web interface.
@@ -382,7 +402,7 @@ class CardStatus:
             try:
                 self.status = self.webif.getStatusSky()
             except WebifException as e:
-                print "[OSS] catch exception", e
+                print "[OSS CardStatus.getCardStatus] catch exception", e
 
             if self.status:
                 # gespeicherte unique EMMs anzeigen
@@ -394,7 +414,9 @@ class CardStatus:
                     self.tiers = tiers['tiers']
                     self.expires = tiers['expires']
                 except WebifException as e:
-                    print "[OSS] catch exception", e
+                    print "[OSS CardStatus.getCardStatus] catch exception", e
+        else:
+            print "[OSS CardStatus.getCardStatus] no oscam conf dir found"
 
     #
     # Versuchen, aus dem Oscam-Config-Dir die unique EMMs zu holen
@@ -407,9 +429,9 @@ class CardStatus:
     
 
 class OscamStatus(Screen, CardStatus):
-    version = "2016-11-15 0.9a1"
+    version = "2016-11-20 0.9r1"
     skin = { "fhd": """
-        <screen name="OscamStatus" position="0,0" size="1920,1080" title="Oscam Status" flags="wfNoBorder">
+        <screen name="OscamStatus" position="0,0" size="1920,1080" title="Oscam Sky DE Status" flags="wfNoBorder">
             <widget name="expires" position="20,20" size="600,36" font="Regular;25" />
             <widget name="payload" position="620,20" size="700,36" font="Regular;25" />
             <widget name="f0tier" position="1340,20" size="400,36" font="Regular;25" />
@@ -446,9 +468,9 @@ class OscamStatus(Screen, CardStatus):
             </widget>
             <widget name="key_red" position="20,1000" zPosition="1" size="400,50" font="Regular;20" halign="center" valign="center" backgroundColor="#f01010" foregroundColor="#ffffff" transparent="0" />
         </screen>
-    """, 
-    "hd": """
-        <screen name="OscamStatus" position="0,0" size="1280,720" title="Oscam Status" flags="wfNoBorder">
+        """, 
+        "hd": """
+        <screen name="OscamStatus" position="0,0" size="1280,720" title="Oscam Sky DE Status" flags="wfNoBorder">
             <widget name="expires" position="10,10" size="400,24" font="Regular;18" />
             <widget name="payload" position="420,10" size="430,24" font="Regular;18" />
             <widget name="f0tier" position="860,10" size="330,24" font="Regular;18" />
@@ -485,7 +507,7 @@ class OscamStatus(Screen, CardStatus):
             </widget>
             <widget name="key_red" position="10,666" zPosition="1" size="300,33" font="Regular;16" halign="center" valign="center" backgroundColor="#f01010" foregroundColor="#ffffff" transparent="0" />
         </screen>
-    """ }
+        """ }
     
     def __init__(self, session):
         self.session = session
@@ -536,13 +558,20 @@ class OscamStatus(Screen, CardStatus):
     
     def red(self):
         self.payload = None
-        self.session.openWithCallback(
-            self.fetchPayload, 
-            MessageBox, 
-            _("Das Ermitteln des Payloads dauert etwa 10 Sekunden.\nDazu muss auf einem Sky-Sender geschaltet sein. Fortfahren?"), 
-            type = MessageBox.TYPE_YESNO,
-            timeout = -1
-        )
+        if self.oscamLivelogSupport:
+            self.session.openWithCallback(
+                self.fetchPayload, 
+                MessageBox, 
+                _("Das Ermitteln des Payloads dauert etwa 10 Sekunden.\nDazu muss auf einem Sky-Sender geschaltet sein. Fortfahren?"), 
+                type = MessageBox.TYPE_YESNO,
+                timeout = -1
+            )
+        else:
+            self.session.open(
+                MessageBox, 
+                _("Der Payload kann nicht ermittelt werden, da Oscam ohne Livelog-Supoort übersetzt wurde."), 
+                MessageBox.TYPE_INFO
+            )
     
     def getF0text(self):
         f0text = _("unbekannt")
@@ -598,7 +627,7 @@ class OscamStatus(Screen, CardStatus):
             try:
                 self.webif.writeEmm(self.status['reader'], self.status['caid'], self.emmToWrite, self.callbackWriteEmm)
             except WebifException as e:
-                print "[OSS] catch exception", e
+                print "[OSS OscamStatus.writeEmm] catch exception", e
     
     #
     # Callback vom Webif, wenn Payload auslesen fertig ist
@@ -609,7 +638,7 @@ class OscamStatus(Screen, CardStatus):
             self.expires = tiers['expires']
             self['expires'].setText(_("Karte läuft ab am: %s") % str(self.expires))
         except WebifException as e:
-            print "[OSS] catch exception", e
+            print "[OSS OscamStatus.callbackWriteEmm] catch exception", e
 
 
     #
@@ -621,7 +650,7 @@ class OscamStatus(Screen, CardStatus):
             try:
                 self.webif.fetchPayload(self.callbackFetchPayload)
             except WebifException as e:
-                print "[OSS] catch exception", e
+                print "[OSS OscamStatus.fetchPayload] catch exception", e
 
     #
     # Callback vom Webif, wenn Payload auslesen fertig ist
