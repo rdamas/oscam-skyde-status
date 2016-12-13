@@ -213,6 +213,12 @@ class OscamWebif:
                             reader = client['rname_enc']
                             caid = ent['caid']
                             break
+                    else:
+                        ent = self.getTiers(client['rname_enc'])
+                        if ent['caid'] in ['09C4', '098C', '09B6']:
+                            reader = client['rname_enc']
+                            caid = ent['caid']
+                            break
             if reader and caid:
                 return { 'reader': reader, 'caid': caid }
         
@@ -244,7 +250,7 @@ class OscamWebif:
     
     #
     # Read last payload from 10 seconds live log.
-    # Call callback funtion after read out.
+    # Call callback function after read out.
     #
     def extractPayload(self):
         url = self.webif+'/logpoll.html?debug=0'
@@ -295,16 +301,17 @@ class OscamWebif:
         entitlements = self._get(url)
         tiers = []
         expires = None
+        caid = None
         try:
             obj = json.loads(entitlements)
             for line in obj['oscam']['entitlements']:
                 tiers.append( line['id'][-4:] )
                 if not expires and line['id'][-4:-2] == '00':
                     expires = self._formatDate(line['expireDate'])
+                caid = line['caid']
         except:
             pass
-        return { 'tiers': tiers, 'expires': expires }
-
+        return { 'tiers': tiers, 'expires': expires, 'caid': caid }
 
 
 class CardStatus:
@@ -332,7 +339,12 @@ class CardStatus:
 
     #
     # Look in oscam.version from temp file for ConfigDir parameter
-    # and return it.
+    # and supported features.
+    #
+    # @param tempdir string - directory where oscam.version lives.
+    # set self.oscamConfdir string - path to Oscam configuration directory
+    # set self.oscamWebifSupport bool - is webif support compiled into Oscam
+    # set self.oscamLivelogSupport - is live log support compiled into Oscam
     #
     def readOscamVersion(self, tempdir):
         try:
@@ -355,6 +367,8 @@ class CardStatus:
     #
     # Find Oscam temp dir from running Oscam process.
     # Check if process was startet with param -t or --temp-dir
+    #
+    # @return string - temp dir where oscam.version lives.
     #
     def getOscamTempdir(self):
         tempdir = None
@@ -480,7 +494,7 @@ class CardStatus:
     
 
 class OscamStatus(Screen, CardStatus):
-    version = "2016-11-20 0.9r2"
+    version = "2016-12-13 1.0"
     skin = { "fhd": """
         <screen name="OscamStatus" position="0,0" size="1920,1080" title="Oscam Sky DE Status" flags="wfNoBorder">
             <widget name="expires" position="20,20" size="600,36" font="Regular;25" />
@@ -681,7 +695,7 @@ class OscamStatus(Screen, CardStatus):
         return cardtype
     
     #
-    # Compute card status information and draw Screen elements accordingly.
+    # Compute card status information and set Screen elements accordingly.
     #
     def showCardStatus(self):
         self.getCardStatus()
@@ -713,6 +727,7 @@ class OscamStatus(Screen, CardStatus):
 
     # 
     # Write selected EMM to card using web interface
+    # Callback function on OK click.
     #
     def writeEmm(self, retval):
         if retval:
@@ -735,6 +750,7 @@ class OscamStatus(Screen, CardStatus):
 
     #
     # Read payload information
+    # Callback action on RED click.
     #
     def fetchPayload(self, retval):
         if retval:
@@ -756,7 +772,8 @@ class OscamStatus(Screen, CardStatus):
         self.session.open(MessageBox, _("Der Payload ist: %s") % self.payload, MessageBox.TYPE_INFO)
     
     #
-    # Blank out emmlogdir directive in oscam.conf.
+    # Blank out emmlogdir directive in oscam.conf
+    # Callback action on GREEN click if applicable
     #
     def reconfigEmmlogdir(self, retval):
         if retval:
