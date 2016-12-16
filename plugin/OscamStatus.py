@@ -494,7 +494,7 @@ class CardStatus:
     
 
 class OscamStatus(Screen, CardStatus):
-    version = "2016-12-13 1.0"
+    version = "2016-12-16 1.0.1"
     skin = { "fhd": """
         <screen name="OscamStatus" position="0,0" size="1920,1080" title="Oscam Sky DE Status" flags="wfNoBorder">
             <widget name="expires" position="20,20" size="600,36" font="Regular;25" />
@@ -532,7 +532,7 @@ class OscamStatus(Screen, CardStatus):
                 </convert>
             </widget>
             <widget name="key_red" position="20,1000" zPosition="1" size="400,50" font="Regular;20" halign="center" valign="center" backgroundColor="#f01010" foregroundColor="#ffffff" transparent="0" />
-            <widget name="key_green" position="440,1000" zPosition="1" size="400,50" font="Regular;20" halign="center" valign="center" backgroundColor="#f01010" foregroundColor="#ffffff" transparent="0" />
+            <widget name="key_green" position="440,1000" zPosition="1" size="400,50" font="Regular;20" halign="center" valign="center" backgroundColor="#10a010" foregroundColor="#ffffff" transparent="0" />
         </screen>
         """,
         
@@ -573,7 +573,7 @@ class OscamStatus(Screen, CardStatus):
                 </convert>
             </widget>
             <widget name="key_red" position="10,666" zPosition="1" size="300,33" font="Regular;16" halign="center" valign="center" backgroundColor="#f01010" foregroundColor="#ffffff" transparent="0" />
-            <widget name="key_green" position="320,666" zPosition="1" size="300,33" font="Regular;16" halign="center" valign="center" backgroundColor="#f01010" foregroundColor="#ffffff" transparent="0" />
+            <widget name="key_green" position="320,666" zPosition="1" size="300,33" font="Regular;16" halign="center" valign="center" backgroundColor="#10a010" foregroundColor="#ffffff" transparent="0" />
         </screen>
         """ }
     
