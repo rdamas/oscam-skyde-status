@@ -132,11 +132,11 @@ class OscamConfig:
     
 
 class OscamWebif:
-    """Methoden, um über das Webif an Daten zu gelangen:
-    - läuft eine V13 oder V14?
-    - mit welchem Label?
-    - wann laufen die Entitlements ab?
-    - ein EMM schreiben
+    """Methods to fetch information via Oscam web interface:
+    - do we serve a supported card (V13, V14, Teleclub)?
+    - what's the label of that card
+    - get expire dates of entitlements
+    - write an EMM
     """
     def __init__(self, host, port, user=None, password=None):
         self.webif = 'http://'+host+':'+port
@@ -155,7 +155,7 @@ class OscamWebif:
         print "[OSS OscamWebif.__init__] OscamWebif(%s, %s, %s, %s)" % (host, port, user, password)
 
     #
-    # Get requested web interface url.
+    # GET request for web interface url.
     #
     # @param url string - url
     # @return string - contents of url
@@ -317,7 +317,7 @@ class OscamWebif:
 class CardStatus:
     """Class that holds gathered information from running Oscam instance.
     Is independent of enigma2 session, so testably without running enigma2.
-    Is inherited from OscamStatus.
+    Is inherited from class OscamStatus.
     """
     
     def __init__(self, session):
@@ -639,6 +639,9 @@ class OscamStatus(Screen, CardStatus):
     #
     def red(self):
         self.payload = None
+        # try to fetch payload if we are on a Sky service.
+        # If card is Teleclub, try to fetch payload anyway, as I don't have
+        # enough information for the check.
         if self.isProviderSky() or self.getCardtype() == "Teleclub":
             if self.oscamLivelogSupport:
                 self.session.openWithCallback(
@@ -808,10 +811,15 @@ class OscamStatus(Screen, CardStatus):
         service = self.session.nav.getCurrentService()
         info = service and service.info()
         if info:
+            # On Sky 1 cards are reported "paired", so skip Sky 1.
+            print "[OSS OscamStatus.isProviderSky] payload on", info.getName()
             if info.getName().replace('\xc2\x86','').replace('\xc2\x87','').startswith('Sky 1'):
                 return False
-            onid = info.getInfo(iServiceInformation.sONID)
+            # fetch ONID (Original Network ID) and make sure it belongs to Sky (133).
+            onid = info.getInfo(iServiceInformation.sONID) 
+            # Skip services like Sky News that are FTA.
             isCrypted = info.getInfo(iServiceInformation.sIsCrypted)
+            print "[OSS OscamStatus.isProviderSky] ONID=%d, isCrypted=%d" % (onid, isCrypted)
             return onid == 133 and isCrypted == 1
         return False
 
