@@ -494,7 +494,7 @@ class CardStatus:
     
 
 class OscamStatus(Screen, CardStatus):
-    version = "2017-03-28 1.1 beta"
+    version = "2017-03-28 1.1"
     skin = { "fhd": """
         <screen name="OscamStatus" position="0,0" size="1920,1080" title="Oscam Sky DE Status" flags="wfNoBorder">
             <widget name="expires" position="20,20" size="600,36" font="Regular;25" />
@@ -775,18 +775,20 @@ class OscamStatus(Screen, CardStatus):
         self.payload = payload
         if self.payload:
             self['payload'].setText(_("Payload: %s") % str(self.payload))
+            
+            info = ""
+            if self.payload.startswith("0F 04 00 00 00 00") or self.payload.startswith("0F 06 00 00 00 00"):
+                info = "Die Karte ist aktiv und nicht gepairt"
+            elif self.payload.startswith("0F 04 00 10 20 00") or self.payload.startswith("0F 06 00 10 20 00"):
+                info = "Die Karte muss verlängert werden"
+            elif self.payload.startswith("0F 04 00 10 00 00") or self.payload.startswith("0F 06 00 10 00 00"):
+                info = "Die Karte ist gepairt"
+            elif self.payload.startswith("0F 04 00 00 20 00") or self.payload.startswith("0F 06 00 00 20 00"):
+                info = "Dieser Sender ist nicht abonniert"
+            self.session.open(MessageBox, _("Der Payload ist: %s\n%s") % (self.payload, info), MessageBox.TYPE_INFO)
+
         else:
             self['payload'].setText(_("Payload konnte nicht ermittelt werden."))
-        info = ""
-        if self.payload.startswith("0F 04 00 00 00 00") or self.payload.startswith("0F 06 00 00 00 00"):
-            info = "Die Karte ist aktiv und nicht gepairt"
-        elif self.payload.startswith("0F 04 00 10 20 00") or self.payload.startswith("0F 06 00 10 20 00"):
-            info = "Die Karte muss verlängert werden"
-        elif self.payload.startswith("0F 04 00 10 00 00") or self.payload.startswith("0F 06 00 10 00 00"):
-            info = "Die Karte ist gepairt"
-        elif self.payload.startswith("0F 04 00 00 20 00") or self.payload.startswith("0F 06 00 00 20 00"):
-            info = "Dieser Sender ist nicht abonniert"
-        self.session.open(MessageBox, _("Der Payload ist: %s\n%s") % (self.payload, info), MessageBox.TYPE_INFO)
     
     #
     # Blank out emmlogdir directive in oscam.conf
