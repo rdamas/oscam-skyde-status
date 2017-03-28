@@ -2,7 +2,7 @@
 #######################################################################
 #
 #  Oscam Skyde Status
-#  Version 1.0
+#  Version 1.1
 #
 #  Copyright (c) 2016 by Robert Damas
 #  All rights reserved.
