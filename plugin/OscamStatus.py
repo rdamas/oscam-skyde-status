@@ -657,7 +657,7 @@ class OscamStatus(Screen, CardStatus):
         else:
             self.session.open(
                 MessageBox, 
-                _("Der Payload kann nur auf einem Sky-Sender ermittelt werden."), 
+                _("Der Payload kann nur auf einem abonnierten Sky-Sender ermittelt werden."), 
                 MessageBox.TYPE_INFO
             )
             
@@ -784,6 +784,8 @@ class OscamStatus(Screen, CardStatus):
             info = "Die Karte muss verlängert werden"
         elif self.payload.startswith("0F 04 00 10 00 00") or self.payload.startswith("0F 06 00 10 00 00"):
             info = "Die Karte ist gepairt"
+        elif self.payload.startswith("0F 04 00 00 20 00") or self.payload.startswith("0F 06 00 00 20 00"):
+            info = "Dieser Sender ist nicht abonniert"
         self.session.open(MessageBox, _("Der Payload ist: %s\n%s") % (self.payload, info), MessageBox.TYPE_INFO)
     
     #
@@ -804,6 +806,8 @@ class OscamStatus(Screen, CardStatus):
         service = self.session.nav.getCurrentService()
         info = service and service.info()
         if info:
+            if info.getName().replace('\xc2\x86','').replace('\xc2\x87','').startswith('Sky 1'):
+                return False
             onid = info.getInfo(iServiceInformation.sONID)
             isCrypted = info.getInfo(iServiceInformation.sIsCrypted)
             return onid == 133 and isCrypted == 1
