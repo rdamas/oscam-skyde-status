@@ -326,6 +326,7 @@ class CardStatus:
         self.oscamConfdir = None
         self.oscamWebifSupport = None
         self.oscamLivelogSupport = None
+        self.oscamWebifPort = None
         self.localhostAccess = None
         self.status = None
         self.tiers = None
@@ -360,9 +361,13 @@ class CardStatus:
                 if 'LiveLog support:' in line:
                     self.oscamLivelogSupport = line.split(":")[1].strip() == 'yes'
                     print "[OSS CardStatus.readOscamVersion] livelog support:", self.oscamLivelogSupport
+                
+                if 'WebifPort:' in line:
+                    self.oscamWebifPort = line.split(":")[1].strip()
+                    print "[OSS CardStatus.readOscamVersion] webif port:", self.oscamWebifPort
                     
-        except:
-            print "[OSS CardStatus.readOscamVersion] kann", tempdir, "nicht öffnen."
+        except Exception as e:
+            print "[OSS CardStatus.readOscamVersion] kann", tempdir, "nicht öffnen:", e
     
     #
     # Find Oscam temp dir from running Oscam process.
@@ -408,12 +413,10 @@ class CardStatus:
         tempdir = '/tmp/.oscam'
         
         # @tested
-        if os.path.exists(tempdir):
-            self.readOscamVersion(tempdir)
-            return
+        if not os.path.exists(tempdir):
+            tempdir = self.getOscamTempdir()
         
         # @tested
-        tempdir = self.getOscamTempdir()
         if tempdir and os.path.exists(tempdir):
             self.readOscamVersion(tempdir)
     
@@ -423,26 +426,35 @@ class CardStatus:
     def getOscamWebif(self):
         if self.oscamWebifSupport:
             user = self.oscamConfig.getWebif()
-            try:
-                httpuser = user['httpuser']
-            except KeyError:
-                httpuser = None
-            try:
-                httppwd = user['httppwd']
-            except KeyError:
-                httppwd = None
+            httpuser = None
+            httppwd = None
+            if user:
+            
+                try:
+                    httpuser = user['httpuser']
+                except KeyError:
+                    pass
+                
+                try:
+                    httppwd = user['httppwd']
+                except KeyError:
+                    pass
 
-            self.localhostAccess = True
-            try:
-                httpallowed = user['httpallowed']
-                print "[OSS CardStatus.getOscamWebif] httpallowed:", httpallowed
-                if '127.0.0.' not in httpallowed and '::1' not in httpallowed:
-                    self.localhostAccess = False
-            except:
-                pass
+                self.localhostAccess = True
+                try:
+                    httpallowed = user['httpallowed']
+                    print "[OSS CardStatus.getOscamWebif] httpallowed:", httpallowed
+                    if '127.0.0.' not in httpallowed and '::1' not in httpallowed:
+                        self.localhostAccess = False
+                except:
+                    pass
+
+            # null config Oscam
+            elif self.oscamWebifPort:
+                user = { 'hostname': '127.0.0.1', 'httpport': self.oscamWebifPort, }
 
             return OscamWebif(user['hostname'], user['httpport'], httpuser, httppwd)
-        
+                    
         else:
             print "[OSS CardStatus.getOscamWebif] no webif support"
             raise WebifException(501)
@@ -494,7 +506,7 @@ class CardStatus:
     
 
 class OscamStatus(Screen, CardStatus):
-    version = "2017-03-28 1.1"
+    version = "2017-04-04 1.2"
     skin = { "fhd": """
         <screen name="OscamStatus" position="0,0" size="1920,1080" title="Oscam Sky DE Status" flags="wfNoBorder">
             <widget name="expires" position="20,20" size="600,36" font="Regular;25" />
