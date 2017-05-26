@@ -499,14 +499,16 @@ class CardStatus:
     # Read unique EMM's from Oscam config dir
     #
     def getSavedEmm(self):
-        retemm = self.oscamConfig.getSavedEmm(self.status['reader'])
-        self.hint = retemm['hint']
-        self.list = [ ("Erstes Vorkommen", "Letztes Vorkommen", "EMM", "")]
-        self.list.extend( retemm['emm'] )
+        print "[OSS CardStatus.getSavedEmms] "
+        if self.status:
+            retemm = self.oscamConfig.getSavedEmm(self.status['reader'])
+            self.hint = retemm['hint']
+            self.list = [ ("Erstes Vorkommen", "Letztes Vorkommen", "EMM", "")]
+            self.list.extend( retemm['emm'] )
+            print "[OSS CardStatus.getSavedEmms] show", len(retemm['emm']), "EMMs"
     
-
 class OscamStatus(Screen, CardStatus):
-    version = "2017-04-04 1.2"
+    version = "2017-05-26 1.3"
     skin = { "fhd": """
         <screen name="OscamStatus" position="0,0" size="1920,1080" title="Oscam Sky DE Status" flags="wfNoBorder">
             <widget name="expires" position="20,20" size="600,36" font="Regular;25" />
@@ -608,6 +610,9 @@ class OscamStatus(Screen, CardStatus):
         self.adaptScreen()
         self.skin = OscamStatus.skin[self.useskin]
         
+        self.timerRereadEmms = eTimer()
+        self.timerRereadEmms.callback.append(self.showEmms)
+        
         CardStatus.__init__(self, session)
         Screen.__init__(self, session)
 
@@ -630,6 +635,9 @@ class OscamStatus(Screen, CardStatus):
         self.onLayoutFinish.append(self.showCardStatus)
 
     def cancel(self):
+        self.timerRereadEmms.stop()
+        if self.webif:
+            self.webif.timer.stop()
         self.close()
     
     #
@@ -738,6 +746,7 @@ class OscamStatus(Screen, CardStatus):
                 pass
 
             self['emmlist'].setList(self.list)
+            self.timerRereadEmms.start(60000, True)
             
             if self.list and len(self.list) < 2 and self.hint == OscamConfig.EMM_VAR_LOG:
                 self['key_green'].setText(_("Emmlogdir fixen"))
@@ -748,6 +757,12 @@ class OscamStatus(Screen, CardStatus):
             else:
                 self['headline'].setText(_("In oscam.conf muss für 127.0.0.1 Zugriff erlaubt werden."))
 
+    def showEmms(self):
+        self.getSavedEmm()
+        self['emmlist'].setList(self.list)
+        self.timerRereadEmms.start(60000, True)
+
+        
     # 
     # Write selected EMM to card using web interface
     # Callback function on OK click.
