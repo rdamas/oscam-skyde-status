@@ -31,12 +31,14 @@ class OscamConfig:
     EMM_OK        = 1
     EMM_NOT_FOUND = 2
     EMM_VAR_LOG   = 3
+    EMM_NOCHANGE  = 4
     
     def __init__(self, confdir):
         self.confdir = confdir
         self.cp = ConfigParser.SafeConfigParser()
         self.webif = None
         self.emmlogdir = None
+        self.emmlogfileDate = 0
         self._readOscamUser()
     
     def _readOscamUser(self):
@@ -79,33 +81,43 @@ class OscamConfig:
     def getSavedEmm(self, reader):
 
         logfile = self.emmlogdir + '/' + reader + '_unique_emm.log'
+        print "[OSS OscamConfig.getSavedEmm] versuche '%s' zu lesen" % logfile
+
         seen = {}
         ret = []
         hint = self.EMM_OK
-
-        print "[OSS OscamConfig.getSavedEmm] versuche '%s' zu lesen" % logfile
-
         try:
-            with open(logfile, 'r') as log:
-                for line in log:
-                    m = re.search(r"(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})\s+[0-9A-Z]{16}\s+([0-9A-F]+)\s+", line.rstrip())
-                    if m:
-                        date = m.group(1)
-                        key = m.group(2)
-                        try:
-                            if seen[key]['first'] > date:
-                                seen[key]['first'] = date
-                            if seen[key]['last'] < date:
-                                seen[key]['last'] = date
-                        except KeyError:
-                            seen[key] = {}
-                            seen[key]['first'] = date
-                            seen[key]['last'] = date
-        except IOError as e:
+            stat = os.stat(logfile)
+            if self.emmlogfileDate >= stat.st_mtime:
+                hint = self.EMM_NOCHANGE
+                print "[OSS OscamConfig.getSavedEmm] keine neuen EMMs"
+            else:
+                self.emmlogfileDate = stat.st_mtime
+        except OSError as e:
             print "[OSS OscamConfig.getSavedEmm] I/O error: %s" % e.strerror
-            hint = self.EMM_NOT_FOUND
-            if self.emmlogdir[0:8] == '/var/log':
-                hint = self.EMM_VAR_LOG
+
+        if hint == self.EMM_OK:
+            try:
+                with open(logfile, 'r') as log:
+                    for line in log:
+                        m = re.search(r"(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})\s+[0-9A-Z]{16}\s+([0-9A-F]+)\s+", line.rstrip())
+                        if m:
+                            date = m.group(1)
+                            key = m.group(2)
+                            try:
+                                if seen[key]['first'] > date:
+                                    seen[key]['first'] = date
+                                if seen[key]['last'] < date:
+                                    seen[key]['last'] = date
+                            except KeyError:
+                                seen[key] = {}
+                                seen[key]['first'] = date
+                                seen[key]['last'] = date
+            except IOError as e:
+                print "[OSS OscamConfig.getSavedEmm] I/O error: %s" % e.strerror
+                hint = self.EMM_NOT_FOUND
+                if self.emmlogdir[0:8] == '/var/log':
+                    hint = self.EMM_VAR_LOG
 
         if seen:
             keys = sorted(seen, key=lambda x: seen[x]['last'], reverse=True)
@@ -759,7 +771,8 @@ class OscamStatus(Screen, CardStatus):
 
     def showEmms(self):
         self.getSavedEmm()
-        self['emmlist'].setList(self.list)
+        if self.hint != OscamConfig.EMM_NOCHANGE:
+            self['emmlist'].setList(self.list)
         self.timerRereadEmms.start(60000, True)
 
         
