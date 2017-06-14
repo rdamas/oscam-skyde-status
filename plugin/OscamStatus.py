@@ -377,7 +377,13 @@ class CardStatus:
                 if 'WebifPort:' in line:
                     self.oscamWebifPort = line.split(":")[1].strip()
                     print "[OSS CardStatus.readOscamVersion] webif port:", self.oscamWebifPort
-                    
+            
+            #
+            # Konfiguration ohne Webinterface
+            if self.oscamWebifPort == "0":
+                self.oscamWebifSupport = False
+                print "[OSS CardStatus.readOscamVersion] webif not enabled"
+                
         except Exception as e:
             print "[OSS CardStatus.readOscamVersion] kann", tempdir, "nicht öffnen:", e
     
@@ -520,7 +526,7 @@ class CardStatus:
             print "[OSS CardStatus.getSavedEmms] show", len(retemm['emm']), "EMMs"
     
 class OscamStatus(Screen, CardStatus):
-    version = "2017-05-26 1.3"
+    version = "2017-06-14 1.4"
     skin = { "fhd": """
         <screen name="OscamStatus" position="0,0" size="1920,1080" title="Oscam Sky DE Status" flags="wfNoBorder">
             <widget name="expires" position="20,20" size="600,36" font="Regular;25" />
@@ -670,32 +676,33 @@ class OscamStatus(Screen, CardStatus):
     # Fetch card payload from Oscam livelog after confirmation.
     #
     def red(self):
-        self.payload = None
-        # try to fetch payload if we are on a Sky service.
-        # If card is Teleclub, try to fetch payload anyway, as I don't have
-        # enough information for the check.
-        if self.isProviderSky() or self.getCardtype() == "Teleclub":
-            if self.oscamLivelogSupport:
-                self.session.openWithCallback(
-                    self.fetchPayload, 
-                    MessageBox, 
-                    _("Das Ermitteln des Payloads dauert etwa 10 Sekunden.\nFortfahren?"), 
-                    type = MessageBox.TYPE_YESNO,
-                    timeout = -1
-                )
+        if self.oscamWebifSupport:
+            self.payload = None
+            # try to fetch payload if we are on a Sky service.
+            # If card is Teleclub, try to fetch payload anyway, as I don't have
+            # enough information for the check.
+            if self.isProviderSky() or self.getCardtype() == "Teleclub":
+                if self.oscamLivelogSupport:
+                    self.session.openWithCallback(
+                        self.fetchPayload, 
+                        MessageBox, 
+                        _("Das Ermitteln des Payloads dauert etwa 10 Sekunden.\nFortfahren?"), 
+                        type = MessageBox.TYPE_YESNO,
+                        timeout = -1
+                    )
+                else:
+                    self.session.open(
+                        MessageBox, 
+                        _("Der Payload kann nicht ermittelt werden, da Oscam ohne Livelog-Support übersetzt wurde."), 
+                        MessageBox.TYPE_INFO
+                    )
             else:
                 self.session.open(
                     MessageBox, 
-                    _("Der Payload kann nicht ermittelt werden, da Oscam ohne Livelog-Support übersetzt wurde."), 
+                    _("Der Payload kann nur auf einem abonnierten Sky-Sender ermittelt werden."), 
                     MessageBox.TYPE_INFO
                 )
-        else:
-            self.session.open(
-                MessageBox, 
-                _("Der Payload kann nur auf einem abonnierten Sky-Sender ermittelt werden."), 
-                MessageBox.TYPE_INFO
-            )
-            
+
     
     #
     # Blank out emmlogdir directive in oscam.conf after confirmation.
@@ -741,33 +748,38 @@ class OscamStatus(Screen, CardStatus):
     # Compute card status information and set Screen elements accordingly.
     #
     def showCardStatus(self):
-        self.getCardStatus()
+        try:
+            self.getCardStatus()
     
-        self['f0tier'].setText(_("F0-Tier vorhanden: %s") % self.getF0text() )
-        self['cardtype'].setText( _("Kartentyp: %s") % self.getCardtype() )
-        
-        if self.expires:
-            self['expires'].setText(_("Karte läuft ab am: %s") % str(self.expires))
-        else:
-            self['expires'].setText(_("Status konnte nicht ermittelt werden."))
-            
-        if self.status:
-            try:
-                self['headline'].setText(_(self.hintText[self.hint]))
-            except KeyError:
-                pass
+            self['f0tier'].setText(_("F0-Tier vorhanden: %s") % self.getF0text() )
+            self['cardtype'].setText( _("Kartentyp: %s") % self.getCardtype() )
 
-            self['emmlist'].setList(self.list)
-            self.timerRereadEmms.start(60000, True)
-            
-            if self.list and len(self.list) < 2 and self.hint == OscamConfig.EMM_VAR_LOG:
-                self['key_green'].setText(_("Emmlogdir fixen"))
-            
-        else:
-            if self.localhostAccess:
-                self['headline'].setText(_("Ist Oscam gestartet? Läuft eine lokale V13/V14 Karte?"))
+            if self.expires:
+                self['expires'].setText(_("Karte läuft ab am: %s") % str(self.expires))
             else:
-                self['headline'].setText(_("In oscam.conf muss für 127.0.0.1 Zugriff erlaubt werden."))
+                self['expires'].setText(_("Status konnte nicht ermittelt werden."))
+
+            if self.status:
+                try:
+                    self['headline'].setText(_(self.hintText[self.hint]))
+                except KeyError:
+                    pass
+
+                self['emmlist'].setList(self.list)
+                self.timerRereadEmms.start(60000, True)
+
+                if self.list and len(self.list) < 2 and self.hint == OscamConfig.EMM_VAR_LOG:
+                    self['key_green'].setText(_("Emmlogdir fixen"))
+
+            else:
+                if self.localhostAccess:
+                    self['headline'].setText(_("Ist Oscam gestartet? Läuft eine lokale V13/V14 Karte?"))
+                else:
+                    self['headline'].setText(_("In oscam.conf muss für 127.0.0.1 Zugriff erlaubt werden."))
+        except WebifException as e:
+            self['headline'].setText(_("Das Webinterface scheint nicht konfiguriert zu sein."))
+            self['key_red'].setText("")
+            self['payload'].setText("")
 
     def showEmms(self):
         self.getSavedEmm()
